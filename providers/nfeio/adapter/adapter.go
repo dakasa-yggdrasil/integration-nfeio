@@ -57,6 +57,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpCancelNfse:
+			var in CancelNFSeInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := CancelNFSe(ctx, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -203,6 +213,46 @@ func GetNFSeStatus(ctx context.Context, cli *Client, in GetNFSeStatusInput) (*Is
 		return nil, err
 	}
 	return out, nil
+}
+
+// CancelNFSeInput selects an invoice to cancel.
+type CancelNFSeInput struct {
+	CompanyID string `json:"company_id,omitempty"`
+	InvoiceID string `json:"invoice_id"`
+}
+
+// CancelNFSeOutput carries the cancellation result. Cancelled is true when
+// NFe.io confirms the FSM moved to "Cancelled".
+type CancelNFSeOutput struct {
+	Cancelled   bool   `json:"cancelled"`
+	Status      string `json:"status"`
+	FlowMessage string `json:"flow_message"`
+}
+
+// CancelNFSe PUTs /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel.
+// 422 cancellation_window_closed surfaces as a terminal *NfeIoAPIError so
+// the caller compensates (e.g. issue a credit note) instead of retrying.
+func CancelNFSe(ctx context.Context, cli *Client, in CancelNFSeInput) (*CancelNFSeOutput, error) {
+	companyID := in.CompanyID
+	if companyID == "" {
+		companyID = cli.cfg.CompanyID
+	}
+	if companyID == "" {
+		return nil, errors.New("company_id required (no instance default)")
+	}
+	var raw struct {
+		Status      string `json:"status"`
+		FlowMessage string `json:"flowMessage"`
+	}
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/cancel", companyID, in.InvoiceID)
+	if err := cli.do(ctx, http.MethodPut, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	return &CancelNFSeOutput{
+		Cancelled:   raw.Status == "Cancelled",
+		Status:      raw.Status,
+		FlowMessage: raw.FlowMessage,
+	}, nil
 }
 
 func firstNonEmpty(vals ...string) string {
