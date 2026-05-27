@@ -1,13 +1,26 @@
 name: Release
 
+# Publishes ghcr.io/dakasa-yggdrasil/integration-nfeio.
+#
+# Build triggers (2026-05-27 harmonization — matches integration-efi):
+#   - push to main           → builds branch-main-latest + sha-<short> + edge
+#   - tag push (v*)          → builds v<version> + latest
+#   - workflow_dispatch      → manual one-shot for hotfix sha rolls
+#
+# Previously this workflow only built on tag push, forcing every cycle
+# to either bump a tag OR manually dispatch the workflow. The main-push
+# trigger removes that friction so adapter rolls stay declarative.
+
 on:
   push:
+    branches:
+      - main
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
         description: "Tag to release (e.g. v1.0.0)"
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -23,18 +36,6 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      - name: Resolve version
-        id: ver
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          if [ -n "$INPUT_TAG" ]; then
-            echo "version=$INPUT_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=$REF_NAME" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -42,13 +43,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/dakasa-yggdrasil/integration-nfeio
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=sha-,format=short
+            type=raw,value=edge,enable={{is_default_branch}}
+            type=raw,value=branch-main-latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+          labels: |
+            org.opencontainers.image.title=integration-nfeio
+            org.opencontainers.image.licenses=Apache-2.0
+
       - name: Build & push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ steps.ver.outputs.version }}
-          tags: |
-            ghcr.io/dakasa-yggdrasil/integration-nfeio:${{ steps.ver.outputs.version }}
-            ghcr.io/dakasa-yggdrasil/integration-nfeio:latest
           push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — 2026-05-27
+
+### Changed
+
+- **`.github/workflows/release.yml`**: build image on every push to
+  `main` (matches the integration-efi pattern). Previously the
+  workflow only triggered on tag push, forcing every cycle to either
+  bump a tag OR manually dispatch the workflow. Tag-push + manual
+  dispatch triggers remain in place; the additional main-branch
+  trigger removes the friction so adapter rolls stay declarative.
+- Tagging strategy aligned with integration-efi via
+  `docker/metadata-action@v5`:
+  - `branch-main-latest` + `sha-<short>` + `edge` on main pushes
+  - `v<version>` + `latest` on tag push
+  - optional `${{ inputs.tag }}` on workflow_dispatch
+- **`deploy/service.yaml`**: `metadata.namespace` corrected
+  `yggdrasil-adapters` → `dakasa` (the cluster namespace where the
+  Service is actually live, verified 2026-05-27 via `kubectl get svc
+  -A | grep integration-nfeio`). Pre-fix the source manifest would
+  have created a duplicate Service in the wrong namespace on the next
+  `apply_manifest` cycle.
+
 ## v2.2.3 — 2026-05-27
 
 ### Fixed
