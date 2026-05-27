@@ -97,6 +97,19 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpListMunicipalities:
+			var in ListMunicipalitiesInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			if deps == nil || deps.MunicipalitiesCache == nil {
+				return nil, fmt.Errorf("list_municipalities: cache not wired")
+			}
+			out, err := ListMunicipalities(ctx, cli, deps.MunicipalitiesCache, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -108,10 +121,8 @@ func ExecuteHandler(
 // that ExecuteHandler needs alongside the always-required client +
 // templates. Each new capability that needs its own per-process state
 // adds a field here so the call site in main.go stays one struct literal.
-//
-// MunicipalitiesCache is wired in Task 24 alongside list_municipalities.
 type ExecuteDeps struct {
-	MunicipalitiesCache any
+	MunicipalitiesCache *MunicipalitiesCache
 }
 
 // IssueNFSeInput mirrors spec §3.1.
