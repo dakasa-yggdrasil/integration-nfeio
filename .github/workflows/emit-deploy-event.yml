@@ -1,0 +1,41 @@
+# Inline curl+jq pattern — matches the convention established for
+# integration-template / integration-grafana / integration-secrets-management.
+# Avoids the cross-org private-Action 404 trap.
+# Safe: untrusted inputs are bound to env vars (RUN_ID, HEAD_SHA, REPO),
+# never interpolated directly into shell.
+name: Emit Deploy Event
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  emit:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST deploy event to yggdrasil-core
+        env:
+          YGGDRASIL_DEPLOY_TOKEN: ${{ secrets.YGGDRASIL_DEPLOY_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$YGGDRASIL_DEPLOY_TOKEN" ]; then
+            echo "YGGDRASIL_DEPLOY_TOKEN absent; soft-skip (matches template pattern)"
+            exit 0
+          fi
+          PAYLOAD=$(jq -nc \
+            --arg repo "$REPO" \
+            --arg sha "$HEAD_SHA" \
+            --arg run "$RUN_ID" \
+            '{repo:$repo, sha:$sha, run_id:$run, kind:"release_published"}')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $YGGDRASIL_DEPLOY_TOKEN" \
+            -H "Content-Type: application/json" \
+            https://yggdrasil.dakasa.me/api/v1/events/deploy \
+            -d "$PAYLOAD"

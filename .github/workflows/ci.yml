@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Lint describe contract
+        # Catches drift between SupportedExecuteOperations + Describe() + ActionCatalog.
+        # Same gate that protects integration-template + integration-grafana.
+        run: go run ./cmd/lint-action-catalog
+
+      - name: Validate templates
+        run: go run ./cmd/validate-templates ./manifest/templates/
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1 -timeout 5m
+
+      - name: Build image
+        run: docker build -t integration-nfeio:ci .
