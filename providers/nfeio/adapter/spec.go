@@ -9,10 +9,10 @@ import (
 	"github.com/dakasa-yggdrasil/integration-nfeio/family/contract"
 )
 
-// Prometheus metrics shared across the adapter. Capability-side metrics
-// (request duration, error counter, bulk_issue item counter, template_load)
-// land in the observability finalization pass (Task 31); this initial set
-// unblocks the client retry path + the webhook server.
+// Prometheus metrics shared across the adapter. The set mirrors spec §10
+// observability requirements: request duration histogram + error counter
+// (keyed by capability + status), webhook receive + dedup counters,
+// template-load gauge, bulk_issue item counter, rate-limit gauge.
 var (
 	metricRateLimitRemaining = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "nfeio_rate_limit_remaining",
@@ -28,11 +28,44 @@ var (
 		Name: "nfeio_dedup_hits_total",
 		Help: "LRU dedup cache hits (duplicate webhook events).",
 	})
+
+	metricRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "nfeio_request_duration_seconds",
+		Help: "Duration of each NFe.io HTTP call, by capability.",
+	}, []string{"op"})
+
+	metricRequestErrors = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "nfeio_request_errors_total",
+		Help: "Failed NFe.io requests by HTTP status code.",
+	}, []string{"op", "status"})
+
+	metricTemplateLoad = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "nfeio_template_load_total",
+		Help: "1 per loaded template at startup, keyed by municipio code.",
+	}, []string{"municipio"})
+
+	metricBulkIssueItems = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "nfeio_bulk_issue_items_total",
+		Help: "Items processed by bulk_issue, keyed by result (success|error).",
+	}, []string{"result"})
 )
 
 func init() {
-	prometheus.MustRegister(metricRateLimitRemaining, metricWebhookReceived, metricDedupHits)
+	prometheus.MustRegister(
+		metricRateLimitRemaining,
+		metricWebhookReceived,
+		metricDedupHits,
+		metricRequestDuration,
+		metricRequestErrors,
+		metricTemplateLoad,
+		metricBulkIssueItems,
+	)
 }
+
+// MetricTemplateLoad exposes the template-load gauge so main.go can flip
+// 1 per loaded município at startup without importing the prometheus
+// package in cmd/adapter.
+func MetricTemplateLoad() *prometheus.GaugeVec { return metricTemplateLoad }
 
 const (
 	// Provider is the family id. Matches the integration_type spec.provider

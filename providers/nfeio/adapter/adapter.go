@@ -60,6 +60,9 @@ func executeRoute(
 	if err := json.Unmarshal(raw, &env); err != nil {
 		return nil, fmt.Errorf("decode envelope: %w", err)
 	}
+	// Tag ctx with the capability name so client.do() picks it up for
+	// duration/error metric labels.
+	ctx = WithOp(ctx, env.Operation)
 	switch env.Operation {
 		case OpIssueNfse:
 			var in IssueNFSeInput

@@ -1,6 +1,10 @@
 package adapter
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 func TestSpec_Constants(t *testing.T) {
 	if Provider != "nfeio" {
@@ -32,6 +36,42 @@ func TestSpec_Describe_ReturnsAllCapabilitiesAndReactor(t *testing.T) {
 	for name := range want {
 		if !got[name] {
 			t.Errorf("Describe() missing action %q", name)
+		}
+	}
+}
+
+func TestMetrics_AllSpecRequiredAreRegistered(t *testing.T) {
+	// Spec §10 mandates these 7 metrics on /metrics. We touch each one
+	// (Inc/Set with safe values) so they appear in the default gatherer,
+	// then assert every name is present.
+	metricBulkIssueItems.WithLabelValues("success").Add(0)
+	metricRequestDuration.WithLabelValues("issue_nfse").Observe(0)
+	metricRequestErrors.WithLabelValues("issue_nfse", "200").Add(0)
+	metricWebhookReceived.WithLabelValues("issued").Add(0)
+	metricTemplateLoad.WithLabelValues("3550308").Set(0)
+	metricRateLimitRemaining.Set(0)
+	metricDedupHits.Add(0)
+
+	want := []string{
+		"nfeio_request_duration_seconds",
+		"nfeio_request_errors_total",
+		"nfeio_webhook_received_total",
+		"nfeio_template_load_total",
+		"nfeio_rate_limit_remaining",
+		"nfeio_bulk_issue_items_total",
+		"nfeio_dedup_hits_total",
+	}
+	gathered, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, mf := range gathered {
+		got[mf.GetName()] = true
+	}
+	for _, name := range want {
+		if !got[name] {
+			t.Errorf("metric %q is not registered", name)
 		}
 	}
 }

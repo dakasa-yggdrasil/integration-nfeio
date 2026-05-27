@@ -49,6 +49,9 @@ func main() {
 		logger.Fatal("template load", zap.Error(err))
 	}
 	logger.Info("templates loaded", zap.Int("count", len(templates)))
+	for code := range templates {
+		ad.MetricTemplateLoad().WithLabelValues(code).Set(1)
+	}
 
 	cli, err := ad.NewClient(cfg, logger)
 	if err != nil {

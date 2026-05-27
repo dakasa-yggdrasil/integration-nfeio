@@ -11,10 +11,36 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
 	"github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/config"
 )
+
+// tracer is the package-level OTel tracer used to wrap each NFe.io call
+// in a span. Span attributes include http.method + http.path so traces
+// align with the duration histogram label "op".
+var tracer = otel.Tracer("integration-nfeio")
+
+// opContextKey is the private context key used to thread the operation
+// name (e.g. "issue_nfse") through client.do() for metric labels. Use
+// WithOp at the capability call site; the client reads it back so
+// metrics get the canonical capability name instead of the URL path.
+type opContextKey struct{}
+
+// WithOp tags ctx with the capability name the do() helper should use
+// as the "op" label on duration/error metrics.
+func WithOp(ctx context.Context, op string) context.Context {
+	return context.WithValue(ctx, opContextKey{}, op)
+}
+
+func opFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(opContextKey{}).(string); ok && v != "" {
+		return v
+	}
+	return "unknown"
+}
 
 // Client wraps the NFe.io REST API. Targets the current /v2 surface; the
 // legacy implementation in dakasa-enterprise-payments-api/client/nfe-io.go
@@ -72,12 +98,33 @@ func NewClient(cfg *config.Config, logger *zap.Logger) (*Client, error) {
 // once. Decodes successful 2xx responses into out. Returns *NfeIoAPIError
 // for non-2xx, with RawBody populated so callers can decode the upstream
 // payload (idempotent 409 paths rely on this).
+//
+// Instrumented with an OTel span (http.method + http.path attributes) and
+// a Prometheus duration histogram + error counter keyed by the operation
+// name threaded via WithOp.
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	op := opFromContext(ctx)
+	ctx, span := tracer.Start(ctx, "nfeio."+op)
+	defer span.End()
+	span.SetAttributes(attribute.String("http.method", method), attribute.String("http.path", path))
+	start := time.Now()
+	defer func() {
+		metricRequestDuration.WithLabelValues(op).Observe(time.Since(start).Seconds())
+	}()
+
 	const maxAttempts = 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		err, retryAfter, transient := c.doOnce(ctx, method, path, body, out)
 		if err == nil {
 			return nil
+		}
+		// Record the most recent status on the error counter even on retry —
+		// transient 429/5xx noise is signal too.
+		apiErr := &NfeIoAPIError{}
+		if errors.As(err, &apiErr) {
+			metricRequestErrors.WithLabelValues(op, strconv.Itoa(apiErr.Status)).Inc()
+		} else {
+			metricRequestErrors.WithLabelValues(op, "network").Inc()
 		}
 		if !transient || attempt == maxAttempts {
 			return err
