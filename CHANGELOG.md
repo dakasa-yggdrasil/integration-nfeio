@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.2.1 — 2026-05-27
+
+### Changed
+
+- **Bumped `yggdrasil-sdk-go` v0.7.0 → v0.8.0**. SDK ships an opt-in
+  `DestroyWithDesired[D]` interface that closes the latent
+  destroy-credential bug for adapters that load credentials per-request
+  through reserved bridge keys (`__instance_credentials` etc).
+- **No reconciler changes required.** integration-nfeio binds the
+  NFe.io HTTP client at `WireReconcilers` time via the singleton
+  `cli *Client` — destroy_* operations don't load credentials from
+  reserved bridge keys, so the SDK v0.8.0 opt-in interface is not
+  needed here. The version bump keeps the SDK pin aligned across the
+  ecosystem.
+
 ## v2.2.0 — 2026-05-27
 
 ### Changed
