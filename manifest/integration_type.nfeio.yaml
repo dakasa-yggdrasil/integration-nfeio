@@ -16,10 +16,14 @@ spec:
     version: 2.0.0
     timeout_seconds: 30
   credential_schema:
-    mode: env
-    required:
-    - NFEIO_API_KEY
-    - NFEIO_WEBHOOK_SECRET
+    mode: inline
+    properties:
+      nfeio_api_key:
+        type: string
+        secret: true
+      nfeio_webhook_secret:
+        type: string
+        secret: true
   action_catalog:
   - name: ensure_service_invoice
     category: capability
@@ -167,3 +171,6 @@ spec:
     - observe_webhook_subscriptions
     - destroy_webhook_subscription
     - nfse_webhook_received
+  instance_schema:
+    mode: inline
+    properties: {}
