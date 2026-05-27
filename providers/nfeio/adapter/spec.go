@@ -74,7 +74,7 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "1.0.0"
+	AdapterVersion  = "2.0.0"
 
 	OpIssueNfse          = "issue_nfse"
 	OpGetNfseStatus      = "get_nfse_status"
