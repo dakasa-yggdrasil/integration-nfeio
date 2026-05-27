@@ -87,6 +87,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpRegisterCompany:
+			var in RegisterCompanyInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := RegisterCompany(ctx, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -321,6 +331,86 @@ func retrieveDoc(ctx context.Context, cli *Client, in RetrieveDocInput, kind str
 		return nil, fmt.Errorf("retrieve_%s: empty documentUrl", kind)
 	}
 	return out, nil
+}
+
+// RegisterCompanyInput mirrors spec §3.6. CertificateBase64 +
+// CertificatePassword are optional (only required when the município demands
+// a digital certificate, e.g. São Paulo's RPS workflow).
+type RegisterCompanyInput struct {
+	Name                string         `json:"name"`
+	FederalTaxNumber    int64          `json:"federal_tax_number"`
+	TradeName           string         `json:"trade_name,omitempty"`
+	Email               string         `json:"email"`
+	OpeningDate         string         `json:"opening_date,omitempty"`
+	TaxRegime           string         `json:"tax_regime"`
+	SpecialTaxRegime    string         `json:"special_tax_regime,omitempty"`
+	MunicipalTaxNumber  string         `json:"municipal_tax_number,omitempty"`
+	Address             map[string]any `json:"address"`
+	LoginName           string         `json:"login_name"`
+	LoginPassword       string         `json:"login_password"`
+	CertificateBase64   string         `json:"certificate_base64,omitempty"`
+	CertificatePassword string         `json:"certificate_password,omitempty"`
+}
+
+// RegisterCompanyOutput carries the registration result. AlreadyRegistered
+// is true when NFe.io returned 409 with the existing company envelope —
+// callers treat both as success (idempotent semantics).
+type RegisterCompanyOutput struct {
+	ID                string `json:"id"`
+	FederalTaxNumber  int64  `json:"federal_tax_number"`
+	Name              string `json:"name"`
+	Status            string `json:"status"`
+	AlreadyRegistered bool   `json:"already_registered,omitempty"`
+}
+
+// RegisterCompany POSTs /v2/companies. 409 = already_registered (decoded
+// from the bundled body so the caller sees the existing company ID).
+func RegisterCompany(ctx context.Context, cli *Client, in RegisterCompanyInput) (*RegisterCompanyOutput, error) {
+	body := map[string]any{
+		"name":               in.Name,
+		"federalTaxNumber":   in.FederalTaxNumber,
+		"tradeName":          in.TradeName,
+		"email":              in.Email,
+		"openingDate":        in.OpeningDate,
+		"taxRegime":          in.TaxRegime,
+		"specialTaxRegime":   in.SpecialTaxRegime,
+		"municipalTaxNumber": in.MunicipalTaxNumber,
+		"address":            in.Address,
+		"loginName":          in.LoginName,
+		"loginPassword":      in.LoginPassword,
+	}
+	if in.CertificateBase64 != "" {
+		body["certificateBase64"] = in.CertificateBase64
+		body["certificatePassword"] = in.CertificatePassword
+	}
+	out := &RegisterCompanyOutput{}
+	// NFe.io returns federalTaxNumber as camelCase in the envelope; decode
+	// into an intermediate to capture the camelCase keys reliably.
+	var raw struct {
+		ID               string `json:"id"`
+		FederalTaxNumber int64  `json:"federalTaxNumber"`
+		Name             string `json:"name"`
+		Status           string `json:"status"`
+	}
+	err := cli.do(ctx, http.MethodPost, "/v2/companies", body, &raw)
+	if err == nil {
+		out.ID = raw.ID
+		out.FederalTaxNumber = raw.FederalTaxNumber
+		out.Name = raw.Name
+		out.Status = raw.Status
+		return out, nil
+	}
+	apiErr := &NfeIoAPIError{}
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+		_ = json.Unmarshal(apiErr.RawBody, &raw)
+		out.ID = raw.ID
+		out.FederalTaxNumber = raw.FederalTaxNumber
+		out.Name = raw.Name
+		out.Status = raw.Status
+		out.AlreadyRegistered = true
+		return out, nil
+	}
+	return nil, err
 }
 
 func firstNonEmpty(vals ...string) string {
