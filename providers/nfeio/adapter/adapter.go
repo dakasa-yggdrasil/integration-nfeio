@@ -77,6 +77,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpRetrieveXML:
+			var in RetrieveDocInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := RetrieveXML(ctx, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -282,6 +292,12 @@ type RetrieveDocOutput struct {
 // NFe.io returns a JSON body with documentUrl pointing at a signed S3 URL.
 func RetrievePDF(ctx context.Context, cli *Client, in RetrieveDocInput) (*RetrieveDocOutput, error) {
 	return retrieveDoc(ctx, cli, in, "pdf")
+}
+
+// RetrieveXML GETs /v2/companies/{id}/serviceinvoices/{invoice_id}/xml.
+// Same envelope shape as RetrievePDF — both delegate to retrieveDoc(kind).
+func RetrieveXML(ctx context.Context, cli *Client, in RetrieveDocInput) (*RetrieveDocOutput, error) {
+	return retrieveDoc(ctx, cli, in, "xml")
 }
 
 func retrieveDoc(ctx context.Context, cli *Client, in RetrieveDocInput, kind string) (*RetrieveDocOutput, error) {
