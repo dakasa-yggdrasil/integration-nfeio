@@ -122,6 +122,16 @@ func TestSpec_ObserveServiceInvoicesMergesGetNfseStatus(t *testing.T) {
 	}
 }
 
+func TestSpec_DestroyServiceInvoiceReplacesCancelNfse(t *testing.T) {
+	got := catalogNames()
+	if !got["destroy_service_invoice"] {
+		t.Error("expected destroy_service_invoice")
+	}
+	if got["cancel_nfse"] {
+		t.Error("cancel_nfse must be removed")
+	}
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {
