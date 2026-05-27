@@ -7,36 +7,60 @@ import (
 	"fmt"
 	"net/http"
 
+	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
+	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/rpc"
 	"go.uber.org/zap"
 )
 
-// DescribeHandler returns the JSON-encoded Describe() response. The SDK
-// wraps this in its envelope; the body shape is what yggdrasil-core
-// validates against the integration_type manifest.
-func DescribeHandler(logger *zap.Logger) func(ctx context.Context, raw []byte) ([]byte, error) {
-	return func(ctx context.Context, raw []byte) ([]byte, error) {
-		return json.Marshal(Describe())
+// DescribeHandler returns the SDK-shape handler that responds to the
+// describe capability. yggdrasil-core validates the JSON body against the
+// integration_type manifest.
+func DescribeHandler(logger *zap.Logger) sdkadapter.Handler {
+	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
+		body, err := json.Marshal(Describe())
+		if err != nil {
+			return nil, "", err
+		}
+		return body, "application/json", nil
 	}
 }
 
-// ExecuteHandler returns the execute RPC handler. Routes by op name; the
-// reactor (nfse_webhook_received) is intentionally NOT routed here — it is
-// triggered exclusively by the webhook HTTP server.
+// ExecuteHandler returns the SDK-shape execute handler. Routes by op name;
+// the reactor (nfse_webhook_received) is intentionally NOT routed here —
+// it is triggered exclusively by the webhook HTTP server.
 func ExecuteHandler(
 	logger *zap.Logger,
 	cli *Client,
 	templates map[string]*MunicipioTemplate,
 	deps *ExecuteDeps,
-) func(ctx context.Context, raw []byte) ([]byte, error) {
-	return func(ctx context.Context, raw []byte) ([]byte, error) {
-		var env struct {
-			Operation string          `json:"operation"`
-			Input     json.RawMessage `json:"input"`
+) sdkadapter.Handler {
+	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
+		body, err := executeRoute(ctx, cli, templates, deps, d.Body)
+		if err != nil {
+			return nil, "", err
 		}
-		if err := json.Unmarshal(raw, &env); err != nil {
-			return nil, fmt.Errorf("decode envelope: %w", err)
-		}
-		switch env.Operation {
+		return body, "application/json", nil
+	}
+}
+
+// executeRoute is the pure operation-dispatcher shared between the SDK
+// handler and tests; it accepts the raw execute envelope and returns the
+// JSON response body.
+func executeRoute(
+	ctx context.Context,
+	cli *Client,
+	templates map[string]*MunicipioTemplate,
+	deps *ExecuteDeps,
+	raw []byte,
+) ([]byte, error) {
+	var env struct {
+		Operation string          `json:"operation"`
+		Input     json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("decode envelope: %w", err)
+	}
+	switch env.Operation {
 		case OpIssueNfse:
 			var in IssueNFSeInput
 			if err := json.Unmarshal(env.Input, &in); err != nil {
@@ -143,7 +167,6 @@ func ExecuteHandler(
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
-	}
 }
 
 // ExecuteDeps bundles the optional, capability-specific dependencies
