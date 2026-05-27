@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,6 +67,39 @@ func LoadTemplatesDir(dir string) (map[string]*MunicipioTemplate, error) {
 		}
 		path := filepath.Join(dir, ent.Name())
 		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		tpl := &MunicipioTemplate{}
+		if err := yaml.Unmarshal(data, tpl); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		if err := validateTemplate(tpl, path); err != nil {
+			return nil, err
+		}
+		out[tpl.MunicipioCode] = tpl
+	}
+	return out, nil
+}
+
+// LoadTemplatesFS is the io/fs.FS variant of LoadTemplatesDir. Useful for
+// embedded templates baked into the binary via //go:embed. dir is "." when
+// the FS is already scoped to the templates directory.
+func LoadTemplatesFS(fsys fs.FS, dir string) (map[string]*MunicipioTemplate, error) {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return nil, fmt.Errorf("read templates fs %s: %w", dir, err)
+	}
+	out := make(map[string]*MunicipioTemplate)
+	for _, ent := range entries {
+		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".yaml") {
+			continue
+		}
+		path := ent.Name()
+		if dir != "." && dir != "" {
+			path = dir + "/" + ent.Name()
+		}
+		data, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", path, err)
 		}

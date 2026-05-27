@@ -15,7 +15,9 @@ package main
 
 import (
 	"context"
+	"embed"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"strings"
@@ -28,6 +30,12 @@ import (
 	ad "github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/adapter"
 	"github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/config"
 )
+
+// Templates copied here at build time from manifest/templates/ (Go embed
+// cannot escape with '..'; cp -r happens in Dockerfile and CI).
+//
+//go:embed templates/*.yaml
+var embeddedTemplates embed.FS
 
 // Version is overridden at link time by -X main.Version=vX.Y.Z.
 var Version = ad.AdapterVersion
@@ -44,7 +52,18 @@ func main() {
 		logger.Fatal("config load", zap.Error(err))
 	}
 
-	templates, err := ad.LoadTemplatesDir(cfg.TemplatesDir)
+	// Prefer filesystem dir when TEMPLATES_DIR is set + readable (dev/tests);
+	// otherwise fall back to embedded templates baked into the binary.
+	var templates map[string]*ad.MunicipioTemplate
+	if _, statErr := os.Stat(cfg.TemplatesDir); statErr == nil {
+		templates, err = ad.LoadTemplatesDir(cfg.TemplatesDir)
+	} else {
+		var sub fs.FS
+		sub, err = fs.Sub(embeddedTemplates, "templates")
+		if err == nil {
+			templates, err = ad.LoadTemplatesFS(sub, ".")
+		}
+	}
 	if err != nil {
 		logger.Fatal("template load", zap.Error(err))
 	}
