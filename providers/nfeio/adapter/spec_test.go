@@ -155,6 +155,29 @@ func TestSpec_ObserveMunicipalitiesReplacesListMunicipalities(t *testing.T) {
 	}
 }
 
+func TestSpec_NfeioWebhookSubscriptionTriple(t *testing.T) {
+	got := catalogNames()
+	for _, want := range []string{
+		"ensure_webhook_subscription",
+		"observe_webhook_subscriptions",
+		"destroy_webhook_subscription",
+	} {
+		if !got[want] {
+			t.Errorf("expected %q present", want)
+		}
+	}
+}
+
+func TestSpec_NfeioWebhookSubscriptionResourceType(t *testing.T) {
+	desc := Describe()
+	for _, rt := range desc.ResourceTypes {
+		if rt.Name == "webhook_subscription" {
+			return
+		}
+	}
+	t.Fatal("webhook_subscription resource_type missing")
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {
