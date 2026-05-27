@@ -1,7 +1,7 @@
 apiVersion: yggdrasil.io/v1alpha1
 kind: capability
 metadata:
-  name: cancel_nfse
+  name: destroy_service_invoice
   namespace: dakasa
 spec:
   integration_type: nfeio
@@ -9,9 +9,11 @@ spec:
   idempotent: true
   resource_types: [service_invoice]
   description: >
-    PUT /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel. 422
+    Destroy (cancel) an emitted NFSe (v2.0.0 canonical name; collapses
+    pre-v2.0.0 cancel_nfse). PUT
+    /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel. 422
     cancellation_window_closed is terminal — caller compensates instead
-    of retrying.
+    of retrying. 404 → already-absent success per convention §5.
   input_schema:
     type: object
     required: [invoice_id]

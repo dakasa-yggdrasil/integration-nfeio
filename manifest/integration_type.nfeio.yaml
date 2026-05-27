@@ -5,10 +5,10 @@ metadata:
   namespace: global
 spec:
   provider: nfeio
-  version: 1.0.0
+  version: 2.0.0
   adapter:
     image_repo: ghcr.io/dakasa-yggdrasil/integration-nfeio
-    image_tag: v1.0.0
+    image_tag: v2.0.0
     transport: http_json
     endpoints:
       describe: /rpc/describe
@@ -16,16 +16,17 @@ spec:
   credential_schema:
     mode: env
     required: [NFEIO_API_KEY, NFEIO_WEBHOOK_SECRET]
+  # v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7 Tier C nfe.io).
   action_catalog:
-    - name: issue_nfse
+    - name: ensure_service_invoice
       category: capability
       idempotent: true
       resource_types: [service_invoice]
-    - name: get_nfse_status
+    - name: observe_service_invoices
       category: capability
       idempotent: true
       resource_types: [service_invoice]
-    - name: cancel_nfse
+    - name: destroy_service_invoice
       category: capability
       idempotent: true
       resource_types: [service_invoice]
@@ -37,11 +38,15 @@ spec:
       category: capability
       idempotent: true
       resource_types: [service_invoice]
-    - name: register_company
+    - name: ensure_company
       category: capability
       idempotent: true
       resource_types: [company]
-    - name: list_municipalities
+    - name: observe_companies
+      category: capability
+      idempotent: true
+      resource_types: [company]
+    - name: observe_municipalities
       category: capability
       idempotent: true
       resource_types: [municipality]
@@ -57,6 +62,18 @@ spec:
       category: capability
       idempotent: true
       resource_types: [municipality_template]
+    - name: ensure_webhook_subscription
+      category: capability
+      idempotent: true
+      resource_types: [webhook_subscription]
+    - name: observe_webhook_subscriptions
+      category: capability
+      idempotent: true
+      resource_types: [webhook_subscription]
+    - name: destroy_webhook_subscription
+      category: capability
+      idempotent: true
+      resource_types: [webhook_subscription]
     - name: nfse_webhook_received
       category: reactor
       idempotent: true

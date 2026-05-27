@@ -1,0 +1,19 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: observe_webhook_subscriptions
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [webhook_subscription]
+  description: >
+    Observe (read) webhook subscriptions at NFe.io. With filter {id}
+    returns a single-entry result (GET /v2/webhooks/{id}); otherwise
+    paginates GET /v2/webhooks.
+  input_schema:
+    type: object
+    properties:
+      id:     {type: string}
+      cursor: {type: string}

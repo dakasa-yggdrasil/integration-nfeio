@@ -1,7 +1,7 @@
 apiVersion: yggdrasil.io/v1alpha1
 kind: capability
 metadata:
-  name: register_company
+  name: ensure_company
   namespace: dakasa
 spec:
   integration_type: nfeio
@@ -9,9 +9,10 @@ spec:
   idempotent: true
   resource_types: [company]
   description: >
-    POST /v2/companies. Registers a company in NFe.io.
-    409 already_registered surfaces as success with
-    already_registered=true and the existing company envelope decoded.
+    Ensure a company exists at NFe.io for the given federal_tax_number
+    (v2.0.0 canonical name; collapses pre-v2.0.0 register_company).
+    POSTs /v2/companies; 409 already_registered decoded into existing
+    envelope (idempotent success path).
   input_schema:
     type: object
     required: [name, federal_tax_number, email, tax_regime, address, login_name, login_password]

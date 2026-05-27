@@ -1,0 +1,24 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: observe_service_invoices
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [service_invoice]
+  description: >
+    Observe (read) service invoices at NFe.io (v2.0.0 canonical name;
+    merges pre-v2.0.0 get_nfse_status). With filter {id|invoice_id}
+    returns a single-entry result (GET
+    /v2/companies/{id}/serviceinvoices/{invoice_id}); otherwise
+    paginates GET /v2/companies/{id}/serviceinvoices.
+  input_schema:
+    type: object
+    properties:
+      company_id:  {type: string}
+      invoice_id:  {type: string}
+      id:          {type: string}
+      page_size:   {type: integer}
+      cursor:      {type: string}

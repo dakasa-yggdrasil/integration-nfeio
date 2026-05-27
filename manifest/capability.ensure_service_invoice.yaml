@@ -1,7 +1,7 @@
 apiVersion: yggdrasil.io/v1alpha1
 kind: capability
 metadata:
-  name: issue_nfse
+  name: ensure_service_invoice
   namespace: dakasa
 spec:
   integration_type: nfeio
@@ -9,9 +9,11 @@ spec:
   idempotent: true
   resource_types: [service_invoice]
   description: >
-    Emit a NFSe via POST /v2/companies/{id}/serviceinvoices.
-    Deduplicates on external_id. Municipality template provides
-    ISS rate and service codes. 409 → metadata.duplicate=true.
+    Ensure a service invoice exists for the given external_id (v2.0.0
+    canonical name; collapses pre-v2.0.0 issue_nfse). POST
+    /v2/companies/{id}/serviceinvoices. Municipality template provides
+    ISS rate and service codes. 409 duplicate decoded into existing
+    invoice envelope (idempotent success path).
   input_schema:
     type: object
     required: [municipio_code, external_id, borrower_name, borrower_federal_tax_number, borrower_address, service_amount, description]

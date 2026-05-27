@@ -1,0 +1,18 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: destroy_webhook_subscription
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [webhook_subscription]
+  description: >
+    Destroy a webhook subscription at NFe.io. DELETE
+    /v2/webhooks/{id}. 404 → already-absent success per convention §5.
+  input_schema:
+    type: object
+    required: [id]
+    properties:
+      id: {type: string}

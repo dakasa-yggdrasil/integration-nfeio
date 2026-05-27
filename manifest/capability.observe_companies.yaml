@@ -1,0 +1,21 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: observe_companies
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [company]
+  description: >
+    Observe (read) companies registered at NFe.io. With filter {id}
+    returns a single-entry result (GET /v2/companies/{id}); otherwise
+    paginates GET /v2/companies.
+  input_schema:
+    type: object
+    properties:
+      id:                 {type: string}
+      federal_tax_number: {type: integer}
+      page_size:          {type: integer}
+      cursor:             {type: string}
