@@ -1,0 +1,19 @@
+apiVersion: nfeio.dakasa/v1
+municipio_code: "4106902"
+name: "Curitiba"
+state: "PR"
+service_codes:
+  city_service_code: "10.08"
+  federal_service_code: "10.08"
+  cnae_code: ""
+  nbs_code: "1.03.01"
+iss:
+  rate: 0.02
+  taxation_type: "none"
+  special_regime: ""
+location_defaults:
+  country: "BRA"
+  city_code: "4106902"
+  city_name: "Curitiba"
+rps_serial_number: "1"
+notes: "Curitiba TI services; ISS 2%"
