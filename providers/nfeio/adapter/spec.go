@@ -4,8 +4,23 @@ import (
 	"os"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/dakasa-yggdrasil/integration-nfeio/family/contract"
 )
+
+// Prometheus metrics shared across the adapter. Full set wired in
+// observability pass; this single gauge unblocks the client retry path.
+var (
+	metricRateLimitRemaining = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "nfeio_rate_limit_remaining",
+		Help: "X-RateLimit-Remaining from last NFe.io response.",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(metricRateLimitRemaining)
+}
 
 const (
 	// Provider is the family id. Matches the integration_type spec.provider
