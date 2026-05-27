@@ -2,7 +2,7 @@ apiVersion: yggdrasil.io/v1alpha1
 kind: integration_type
 metadata:
   name: nfeio
-  namespace: dakasa
+  namespace: global
 spec:
   provider: nfeio
   version: 1.0.0
