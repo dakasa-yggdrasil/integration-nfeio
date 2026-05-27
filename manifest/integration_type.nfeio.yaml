@@ -15,66 +15,153 @@ spec:
       execute: /rpc/execute
   credential_schema:
     mode: env
-    required: [NFEIO_API_KEY, NFEIO_WEBHOOK_SECRET]
-  # v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7 Tier C nfe.io).
+    required:
+    - NFEIO_API_KEY
+    - NFEIO_WEBHOOK_SECRET
   action_catalog:
-    - name: ensure_service_invoice
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: observe_service_invoices
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: destroy_service_invoice
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: retrieve_pdf
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: retrieve_xml
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: ensure_company
-      category: capability
-      idempotent: true
-      resource_types: [company]
-    - name: observe_companies
-      category: capability
-      idempotent: true
-      resource_types: [company]
-    - name: observe_municipalities
-      category: capability
-      idempotent: true
-      resource_types: [municipality]
-    - name: manage_template
-      category: capability
-      idempotent: true
-      resource_types: [municipality_template]
-    - name: bulk_issue
-      category: capability
-      idempotent: true
-      resource_types: [service_invoice]
-    - name: calculate_iss
-      category: capability
-      idempotent: true
-      resource_types: [municipality_template]
-    - name: ensure_webhook_subscription
-      category: capability
-      idempotent: true
-      resource_types: [webhook_subscription]
-    - name: observe_webhook_subscriptions
-      category: capability
-      idempotent: true
-      resource_types: [webhook_subscription]
-    - name: destroy_webhook_subscription
-      category: capability
-      idempotent: true
-      resource_types: [webhook_subscription]
-    - name: nfse_webhook_received
-      category: reactor
-      idempotent: true
-      resource_types: [service_invoice]
+  - name: ensure_service_invoice
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: observe_service_invoices
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: destroy_service_invoice
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: retrieve_pdf
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: retrieve_xml
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: ensure_company
+    category: capability
+    idempotent: true
+    resource_types:
+    - company
+  - name: observe_companies
+    category: capability
+    idempotent: true
+    resource_types:
+    - company
+  - name: observe_municipalities
+    category: capability
+    idempotent: true
+    resource_types:
+    - municipality
+  - name: manage_template
+    category: capability
+    idempotent: true
+    resource_types:
+    - municipality_template
+  - name: bulk_issue
+    category: capability
+    idempotent: true
+    resource_types:
+    - service_invoice
+  - name: calculate_iss
+    category: capability
+    idempotent: true
+    resource_types:
+    - municipality_template
+  - name: ensure_webhook_subscription
+    category: capability
+    idempotent: true
+    resource_types:
+    - webhook_subscription
+  - name: observe_webhook_subscriptions
+    category: capability
+    idempotent: true
+    resource_types:
+    - webhook_subscription
+  - name: destroy_webhook_subscription
+    category: capability
+    idempotent: true
+    resource_types:
+    - webhook_subscription
+  - name: nfse_webhook_received
+    category: reactor
+    idempotent: true
+    resource_types:
+    - service_invoice
+  resource_types:
+  - name: service_invoice
+    discoverable: false
+    default_actions:
+    - ensure_service_invoice
+    - observe_service_invoices
+    - destroy_service_invoice
+    - retrieve_pdf
+    - retrieve_xml
+    - bulk_issue
+    - nfse_webhook_received
+    canonical_prefix: thirdparty.nfeio.service_invoice
+    identity_template: service_invoice.{id}
+  - name: company
+    discoverable: false
+    default_actions:
+    - ensure_company
+    - observe_companies
+    - register_company
+    canonical_prefix: thirdparty.nfeio.company
+    identity_template: company.{id}
+  - name: municipality
+    discoverable: false
+    default_actions:
+    - observe_municipalities
+    canonical_prefix: thirdparty.nfeio.municipality
+    identity_template: municipality.{id}
+  - name: municipality_template
+    discoverable: false
+    default_actions:
+    - manage_template
+    - calculate_iss
+    canonical_prefix: thirdparty.nfeio.template
+    identity_template: municipality_template.{id}
+  - name: webhook_subscription
+    discoverable: false
+    default_actions:
+    - ensure_webhook_subscription
+    - observe_webhook_subscriptions
+    - destroy_webhook_subscription
+    canonical_prefix: thirdparty.nfeio.webhook_subscription
+    identity_template: webhook_subscription.{id}
+  discovery:
+    mode: push
+    cursor: none
+  normalization:
+    name_path: metadata.name
+    owner_path: metadata.namespace
+    external_id_path: metadata.name
+    fallback_resource_prefix: thirdparty.nfeio.custom
+  capabilities:
+  - describe
+  - execute
+  execution:
+    supports_dry_run: false
+    idempotent_actions:
+    - ensure_service_invoice
+    - observe_service_invoices
+    - destroy_service_invoice
+    - retrieve_pdf
+    - retrieve_xml
+    - ensure_company
+    - observe_companies
+    - observe_municipalities
+    - manage_template
+    - bulk_issue
+    - calculate_iss
+    - ensure_webhook_subscription
+    - observe_webhook_subscriptions
+    - destroy_webhook_subscription
+    - nfse_webhook_received
