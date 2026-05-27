@@ -63,113 +63,202 @@ func executeRoute(
 	// Tag ctx with the capability name so client.do() picks it up for
 	// duration/error metric labels.
 	ctx = WithOp(ctx, env.Operation)
+	// v2.0.0 canonical names; legacy names (issue_nfse, get_nfse_status,
+	// cancel_nfse, register_company, list_municipalities) are accepted via
+	// the SDK reconcile.WithLegacyNames compat shim wired in main.go. The
+	// shim normalizes to canonical names before delivery, so this switch
+	// only sees the canonical set.
 	switch env.Operation {
-		case OpIssueNfse:
-			var in IssueNFSeInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := IssueNFSe(ctx, cli, templates, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpGetNfseStatus:
-			var in GetNFSeStatusInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := GetNFSeStatus(ctx, cli, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpCancelNfse:
-			var in CancelNFSeInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := CancelNFSe(ctx, cli, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpRetrievePDF:
-			var in RetrieveDocInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := RetrievePDF(ctx, cli, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpRetrieveXML:
-			var in RetrieveDocInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := RetrieveXML(ctx, cli, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpRegisterCompany:
-			var in RegisterCompanyInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := RegisterCompany(ctx, cli, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpListMunicipalities:
-			var in ListMunicipalitiesInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			if deps == nil || deps.MunicipalitiesCache == nil {
-				return nil, fmt.Errorf("list_municipalities: cache not wired")
-			}
-			out, err := ListMunicipalities(ctx, cli, deps.MunicipalitiesCache, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpManageTemplate:
-			var in ManageTemplateInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := ManageTemplate(ctx, templates, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpBulkIssue:
-			var in BulkIssueInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := BulkIssue(ctx, cli, templates, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		case OpCalculateISS:
-			var in CalculateISSInput
-			if err := json.Unmarshal(env.Input, &in); err != nil {
-				return nil, err
-			}
-			out, err := CalculateISS(ctx, templates, in)
-			if err != nil {
-				return nil, err
-			}
-			return json.Marshal(out)
-		default:
-			return nil, fmt.Errorf("unknown operation %q", env.Operation)
+	case OpEnsureServiceInvoice:
+		var in IssueNFSeInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
 		}
+		out, err := IssueNFSe(ctx, cli, templates, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpObserveServiceInvoices:
+		out, err := ObserveServiceInvoices(ctx, cli, env.Input)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpDestroyServiceInvoice:
+		var in CancelNFSeInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := CancelNFSe(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpRetrievePDF:
+		var in RetrieveDocInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := RetrievePDF(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpRetrieveXML:
+		var in RetrieveDocInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := RetrieveXML(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpEnsureCompany:
+		var in RegisterCompanyInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := EnsureCompany(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpObserveCompanies:
+		out, err := ObserveCompanies(ctx, cli, env.Input)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpObserveMunicipalities:
+		var in ListMunicipalitiesInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		if deps == nil || deps.MunicipalitiesCache == nil {
+			return nil, fmt.Errorf("observe_municipalities: cache not wired")
+		}
+		out, err := ListMunicipalities(ctx, cli, deps.MunicipalitiesCache, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpManageTemplate:
+		var in ManageTemplateInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := ManageTemplate(ctx, templates, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpBulkIssue:
+		var in BulkIssueInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := BulkIssue(ctx, cli, templates, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpCalculateISS:
+		var in CalculateISSInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := CalculateISS(ctx, templates, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpEnsureWebhookSubscription:
+		var in EnsureWebhookSubscriptionInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := EnsureWebhookSubscription(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpObserveWebhookSubscriptions:
+		out, err := ObserveWebhookSubscriptions(ctx, cli, env.Input)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case OpDestroyWebhookSubscription:
+		var in DestroyWebhookSubscriptionInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := DestroyWebhookSubscription(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	// Legacy compat — accept pre-v2.0.0 names on the direct RPC path so
+	// callers that haven't migrated yet still work even without the SDK
+	// reconcile shim. Phase 2 (v3.0.0) removes these.
+	case "issue_nfse":
+		var in IssueNFSeInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := IssueNFSe(ctx, cli, templates, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case "get_nfse_status":
+		var in GetNFSeStatusInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := GetNFSeStatus(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case "cancel_nfse":
+		var in CancelNFSeInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := CancelNFSe(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case "register_company":
+		var in RegisterCompanyInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		out, err := EnsureCompany(ctx, cli, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	case "list_municipalities":
+		var in ListMunicipalitiesInput
+		if err := json.Unmarshal(env.Input, &in); err != nil {
+			return nil, err
+		}
+		if deps == nil || deps.MunicipalitiesCache == nil {
+			return nil, fmt.Errorf("list_municipalities: cache not wired")
+		}
+		out, err := ListMunicipalities(ctx, cli, deps.MunicipalitiesCache, in)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(out)
+	default:
+		return nil, fmt.Errorf("unknown operation %q", env.Operation)
+	}
 }
 
 // ExecuteDeps bundles the optional, capability-specific dependencies
@@ -285,8 +374,78 @@ func IssueNFSe(ctx context.Context, cli *Client, templates map[string]*Municipio
 	return nil, err
 }
 
+// ObserveServiceInvoicesInput is the filter envelope. With invoice_id set,
+// behaves like the pre-v2.0.0 get_nfse_status (single-resource lookup).
+// Without it, lists invoices for the configured company.
+type ObserveServiceInvoicesInput struct {
+	CompanyID string `json:"company_id,omitempty"`
+	InvoiceID string `json:"invoice_id,omitempty"`
+	// ID is an alias for InvoiceID accepted from filter envelopes that
+	// follow the universal convention {id} naming.
+	ID string `json:"id,omitempty"`
+	// PageSize bounds list pages; NFe.io applies a server-side default
+	// when omitted.
+	PageSize int    `json:"page_size,omitempty"`
+	Cursor   string `json:"cursor,omitempty"`
+}
+
+// ObserveServiceInvoicesOutput is the response for observe_service_invoices.
+// When filter selects a single invoice, items has length 1 and cursor is "".
+type ObserveServiceInvoicesOutput struct {
+	Items  []IssueNFSeOutput `json:"items"`
+	Cursor string            `json:"cursor,omitempty"`
+}
+
+// ObserveServiceInvoices implements the convention's observe_* semantics for
+// the service_invoice resource. With filter {id|invoice_id} it returns a
+// single-entry result (canonical replacement for get_nfse_status); otherwise
+// it paginates GET /v2/companies/{id}/serviceinvoices.
+func ObserveServiceInvoices(ctx context.Context, cli *Client, raw []byte) (*ObserveServiceInvoicesOutput, error) {
+	in := ObserveServiceInvoicesInput{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("observe_service_invoices: parse filter: %w", err)
+		}
+	}
+	companyID := in.CompanyID
+	if companyID == "" {
+		companyID = cli.cfg.CompanyID
+	}
+	if companyID == "" {
+		return nil, errors.New("company_id required (no instance default)")
+	}
+	// Single-resource path (canonical replacement for get_nfse_status).
+	invoiceID := in.InvoiceID
+	if invoiceID == "" {
+		invoiceID = in.ID
+	}
+	if invoiceID != "" {
+		one, err := GetNFSeStatus(ctx, cli, GetNFSeStatusInput{CompanyID: companyID, InvoiceID: invoiceID})
+		if err != nil {
+			return nil, err
+		}
+		return &ObserveServiceInvoicesOutput{Items: []IssueNFSeOutput{*one}}, nil
+	}
+	// List path. NFe.io paginates server-side; the response carries items
+	// + an optional cursor in the meta envelope. We mirror that to the
+	// caller verbatim so downstream pagination follows the same shape.
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", companyID)
+	if in.Cursor != "" {
+		path += "?cursor=" + in.Cursor
+	}
+	var rawResp struct {
+		Items  []IssueNFSeOutput `json:"items"`
+		Cursor string            `json:"cursor"`
+	}
+	if err := cli.do(ctx, http.MethodGet, path, nil, &rawResp); err != nil {
+		return nil, err
+	}
+	return &ObserveServiceInvoicesOutput{Items: rawResp.Items, Cursor: rawResp.Cursor}, nil
+}
+
 // GetNFSeStatusInput selects an invoice by ID, optionally overriding the
-// company at call time.
+// company at call time. Kept for internal reuse by ObserveServiceInvoices
+// and the legacy compat case in executeRoute.
 type GetNFSeStatusInput struct {
 	CompanyID string `json:"company_id,omitempty"`
 	InvoiceID string `json:"invoice_id"`
@@ -487,4 +646,246 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// EnsureCompany implements the convention's ensure_* semantics for the
+// company resource. GET-then-POST/PATCH: looks up the company by
+// federal_tax_number first; absent → POST; present + drift → PATCH.
+// The pre-v2.0.0 RegisterCompany is preserved internally because NFe.io
+// returns 409 already_registered with the existing envelope, which is
+// the GET-equivalent the convention requires.
+//
+// Practical adoption: NFe.io does not expose a stable
+// `GET /v2/companies?federal_tax_number={x}` filter in v2; the canonical
+// adoption path is "POST and accept 409 as success", which is exactly
+// what RegisterCompany already does. EnsureCompany delegates to that,
+// returning AlreadyRegistered=true on adoption (the convention's
+// idempotent-success path).
+func EnsureCompany(ctx context.Context, cli *Client, in RegisterCompanyInput) (*RegisterCompanyOutput, error) {
+	return RegisterCompany(ctx, cli, in)
+}
+
+// ObserveCompaniesInput is the filter envelope. With federal_tax_number set,
+// returns a single-entry result; otherwise paginates GET /v2/companies.
+type ObserveCompaniesInput struct {
+	FederalTaxNumber int64  `json:"federal_tax_number,omitempty"`
+	ID               string `json:"id,omitempty"`
+	PageSize         int    `json:"page_size,omitempty"`
+	Cursor           string `json:"cursor,omitempty"`
+}
+
+// ObserveCompaniesOutput is the response. Items envelope mirrors the
+// canonical observe_* convention shape across the SDK.
+type ObserveCompaniesOutput struct {
+	Items  []RegisterCompanyOutput `json:"items"`
+	Cursor string                  `json:"cursor,omitempty"`
+}
+
+// ObserveCompanies lists or filters companies at NFe.io. Single-resource
+// lookup uses GET /v2/companies/{id}; list path is GET /v2/companies.
+func ObserveCompanies(ctx context.Context, cli *Client, raw []byte) (*ObserveCompaniesOutput, error) {
+	in := ObserveCompaniesInput{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("observe_companies: parse filter: %w", err)
+		}
+	}
+	if in.ID != "" {
+		var raw struct {
+			ID               string `json:"id"`
+			FederalTaxNumber int64  `json:"federalTaxNumber"`
+			Name             string `json:"name"`
+			Status           string `json:"status"`
+		}
+		path := fmt.Sprintf("/v2/companies/%s", in.ID)
+		if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+			return nil, err
+		}
+		return &ObserveCompaniesOutput{Items: []RegisterCompanyOutput{{
+			ID: raw.ID, FederalTaxNumber: raw.FederalTaxNumber, Name: raw.Name, Status: raw.Status,
+		}}}, nil
+	}
+	path := "/v2/companies"
+	if in.Cursor != "" {
+		path += "?cursor=" + in.Cursor
+	}
+	var rawResp struct {
+		Items []struct {
+			ID               string `json:"id"`
+			FederalTaxNumber int64  `json:"federalTaxNumber"`
+			Name             string `json:"name"`
+			Status           string `json:"status"`
+		} `json:"items"`
+		Cursor string `json:"cursor"`
+	}
+	if err := cli.do(ctx, http.MethodGet, path, nil, &rawResp); err != nil {
+		return nil, err
+	}
+	out := &ObserveCompaniesOutput{Cursor: rawResp.Cursor}
+	for _, it := range rawResp.Items {
+		out.Items = append(out.Items, RegisterCompanyOutput{
+			ID: it.ID, FederalTaxNumber: it.FederalTaxNumber, Name: it.Name, Status: it.Status,
+		})
+	}
+	return out, nil
+}
+
+// EnsureWebhookSubscriptionInput declares the desired webhook subscription.
+// NFe.io binds a subscription to URL + a list of event types (e.g.
+// "Issued", "Cancelled"). Multiple subscriptions per URL are allowed
+// upstream; ensure_* collapses them via adoption (returns the first
+// subscription matching URL+events instead of creating a duplicate).
+type EnsureWebhookSubscriptionInput struct {
+	URL       string   `json:"url"`
+	Events    []string `json:"events"`
+	CompanyID string   `json:"company_id,omitempty"`
+}
+
+// EnsureWebhookSubscriptionOutput is the observed envelope after ensure.
+// Adopted is true when the subscription existed and was not re-created.
+type EnsureWebhookSubscriptionOutput struct {
+	ID        string   `json:"id"`
+	URL       string   `json:"url"`
+	Events    []string `json:"events"`
+	Active    bool     `json:"active"`
+	CompanyID string   `json:"company_id,omitempty"`
+	Adopted   bool     `json:"adopted,omitempty"`
+}
+
+// EnsureWebhookSubscription POSTs /v2/webhooks. NFe.io returns 409 (or 422
+// duplicate) when a subscription with the same URL+events already exists;
+// we adopt by decoding the existing envelope.
+//
+// The convention's GET-then-POST contract is satisfied via this 409-aware
+// path: even though NFe.io does not expose a filter-by-URL query, the
+// duplicate response carries the existing subscription ID so adoption is
+// race-free and idempotent.
+func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhookSubscriptionInput) (*EnsureWebhookSubscriptionOutput, error) {
+	body := map[string]any{
+		"url":    in.URL,
+		"events": in.Events,
+	}
+	if in.CompanyID != "" {
+		body["companyId"] = in.CompanyID
+	}
+	var raw struct {
+		ID        string   `json:"id"`
+		URL       string   `json:"url"`
+		Events    []string `json:"events"`
+		Active    bool     `json:"active"`
+		CompanyID string   `json:"companyId"`
+	}
+	err := cli.do(ctx, http.MethodPost, "/v2/webhooks", body, &raw)
+	if err == nil {
+		return &EnsureWebhookSubscriptionOutput{
+			ID: raw.ID, URL: raw.URL, Events: raw.Events,
+			Active: raw.Active, CompanyID: raw.CompanyID,
+		}, nil
+	}
+	apiErr := &NfeIoAPIError{}
+	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusConflict || apiErr.Status == http.StatusUnprocessableEntity) {
+		_ = json.Unmarshal(apiErr.RawBody, &raw)
+		return &EnsureWebhookSubscriptionOutput{
+			ID: raw.ID, URL: raw.URL, Events: raw.Events,
+			Active: raw.Active, CompanyID: raw.CompanyID, Adopted: true,
+		}, nil
+	}
+	return nil, err
+}
+
+// DestroyWebhookSubscriptionInput selects the subscription by ID.
+type DestroyWebhookSubscriptionInput struct {
+	ID string `json:"id"`
+}
+
+// DestroyWebhookSubscriptionOutput carries the destruction outcome. Deleted
+// is true when NFe.io confirmed removal (200/204); AlreadyAbsent is true
+// when a 404 was treated as success per convention §5.
+type DestroyWebhookSubscriptionOutput struct {
+	Deleted       bool `json:"deleted"`
+	AlreadyAbsent bool `json:"already_absent,omitempty"`
+}
+
+// DestroyWebhookSubscription DELETEs /v2/webhooks/{id}. 404 → already-absent
+// success per convention §5 ("Destroy MUST treat a not-found response as
+// success").
+func DestroyWebhookSubscription(ctx context.Context, cli *Client, in DestroyWebhookSubscriptionInput) (*DestroyWebhookSubscriptionOutput, error) {
+	if in.ID == "" {
+		return nil, errors.New("destroy_webhook_subscription: id required")
+	}
+	path := fmt.Sprintf("/v2/webhooks/%s", in.ID)
+	err := cli.do(ctx, http.MethodDelete, path, nil, nil)
+	if err == nil {
+		return &DestroyWebhookSubscriptionOutput{Deleted: true}, nil
+	}
+	apiErr := &NfeIoAPIError{}
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+		return &DestroyWebhookSubscriptionOutput{Deleted: true, AlreadyAbsent: true}, nil
+	}
+	return nil, err
+}
+
+// ObserveWebhookSubscriptionsInput is the filter envelope.
+type ObserveWebhookSubscriptionsInput struct {
+	ID     string `json:"id,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// ObserveWebhookSubscriptionsOutput mirrors the SDK's observe_* shape.
+type ObserveWebhookSubscriptionsOutput struct {
+	Items  []EnsureWebhookSubscriptionOutput `json:"items"`
+	Cursor string                            `json:"cursor,omitempty"`
+}
+
+// ObserveWebhookSubscriptions lists or filters webhook subscriptions.
+// Filter {id} → single GET /v2/webhooks/{id}; otherwise GET /v2/webhooks.
+func ObserveWebhookSubscriptions(ctx context.Context, cli *Client, raw []byte) (*ObserveWebhookSubscriptionsOutput, error) {
+	in := ObserveWebhookSubscriptionsInput{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &in); err != nil {
+			return nil, fmt.Errorf("observe_webhook_subscriptions: parse filter: %w", err)
+		}
+	}
+	if in.ID != "" {
+		var raw struct {
+			ID        string   `json:"id"`
+			URL       string   `json:"url"`
+			Events    []string `json:"events"`
+			Active    bool     `json:"active"`
+			CompanyID string   `json:"companyId"`
+		}
+		path := fmt.Sprintf("/v2/webhooks/%s", in.ID)
+		if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+			return nil, err
+		}
+		return &ObserveWebhookSubscriptionsOutput{Items: []EnsureWebhookSubscriptionOutput{{
+			ID: raw.ID, URL: raw.URL, Events: raw.Events,
+			Active: raw.Active, CompanyID: raw.CompanyID,
+		}}}, nil
+	}
+	path := "/v2/webhooks"
+	if in.Cursor != "" {
+		path += "?cursor=" + in.Cursor
+	}
+	var rawResp struct {
+		Items []struct {
+			ID        string   `json:"id"`
+			URL       string   `json:"url"`
+			Events    []string `json:"events"`
+			Active    bool     `json:"active"`
+			CompanyID string   `json:"companyId"`
+		} `json:"items"`
+		Cursor string `json:"cursor"`
+	}
+	if err := cli.do(ctx, http.MethodGet, path, nil, &rawResp); err != nil {
+		return nil, err
+	}
+	out := &ObserveWebhookSubscriptionsOutput{Cursor: rawResp.Cursor}
+	for _, it := range rawResp.Items {
+		out.Items = append(out.Items, EnsureWebhookSubscriptionOutput{
+			ID: it.ID, URL: it.URL, Events: it.Events,
+			Active: it.Active, CompanyID: it.CompanyID,
+		})
+	}
+	return out, nil
 }

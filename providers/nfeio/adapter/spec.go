@@ -76,35 +76,51 @@ const (
 	IntegrationType = "nfeio"
 	AdapterVersion  = "2.0.0"
 
-	OpIssueNfse          = "issue_nfse"
-	OpGetNfseStatus      = "get_nfse_status"
-	OpCancelNfse         = "cancel_nfse"
-	OpRetrievePDF        = "retrieve_pdf"
-	OpRetrieveXML        = "retrieve_xml"
-	OpRegisterCompany    = "register_company"
-	OpListMunicipalities = "list_municipalities"
-	OpManageTemplate     = "manage_template"
-	OpBulkIssue          = "bulk_issue"
-	OpCalculateISS       = "calculate_iss"
+	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
+	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
+	OpObserveServiceInvoices = "observe_service_invoices" // merges pre-v2.0.0 get_nfse_status (filter by id)
+	OpDestroyServiceInvoice  = "destroy_service_invoice"  // collapses pre-v2.0.0 cancel_nfse
+	OpRetrievePDF            = "retrieve_pdf"             // kept (allowlist helper — file URL retrieval)
+	OpRetrieveXML            = "retrieve_xml"             // kept (allowlist helper — file URL retrieval)
+	OpEnsureCompany          = "ensure_company"           // collapses pre-v2.0.0 register_company
+	OpObserveCompanies       = "observe_companies"        // NEW: GET /v2/companies (by federal_tax_number filter or list)
+	OpObserveMunicipalities  = "observe_municipalities"   // renames pre-v2.0.0 list_municipalities
+	OpManageTemplate         = "manage_template"          // kept (control-plane action, not external resource)
+	OpBulkIssue              = "bulk_issue"               // kept (bulk action — documented special case)
+	OpCalculateISS           = "calculate_iss"            // kept (allowlist — pure function helper)
+
+	// NEW v2.0.0: webhook_subscription resource lifecycle.
+	OpEnsureWebhookSubscription   = "ensure_webhook_subscription"
+	OpObserveWebhookSubscriptions = "observe_webhook_subscriptions"
+	OpDestroyWebhookSubscription  = "destroy_webhook_subscription"
 
 	ReactorWebhookReceived = "nfse_webhook_received"
 
 	QueueDescribe = "yggdrasil.adapter.nfeio.describe"
 	QueueExecute  = "yggdrasil.adapter.nfeio.execute"
 
-	ResourceServiceInvoice      = "service_invoice"
-	ResourceCompany             = "company"
-	ResourceMunicipality        = "municipality"
+	ResourceServiceInvoice       = "service_invoice"
+	ResourceCompany              = "company"
+	ResourceMunicipality         = "municipality"
 	ResourceMunicipalityTemplate = "municipality_template"
+	ResourceWebhookSubscription  = "webhook_subscription"
 )
 
 // SupportedExecuteOperations lists the operations callable via the execute
 // RPC path. The reactor (nfse_webhook_received) is intentionally excluded —
 // it is triggered by the webhook HTTP server, not RPC.
+//
+// v2.0.0: 14 entries (3 canonical triples for service_invoice / company /
+// webhook_subscription, plus observe_companies + observe_municipalities, plus
+// kept-in-place helpers retrieve_pdf, retrieve_xml, manage_template,
+// bulk_issue, calculate_iss).
 var SupportedExecuteOperations = []string{
-	OpIssueNfse, OpGetNfseStatus, OpCancelNfse, OpRetrievePDF, OpRetrieveXML,
-	OpRegisterCompany, OpListMunicipalities, OpManageTemplate, OpBulkIssue,
-	OpCalculateISS,
+	OpEnsureServiceInvoice, OpObserveServiceInvoices, OpDestroyServiceInvoice,
+	OpRetrievePDF, OpRetrieveXML,
+	OpEnsureCompany, OpObserveCompanies,
+	OpObserveMunicipalities,
+	OpManageTemplate, OpBulkIssue, OpCalculateISS,
+	OpEnsureWebhookSubscription, OpObserveWebhookSubscriptions, OpDestroyWebhookSubscription,
 }
 
 // Describe returns the contract the adapter implements. Transport is selected
@@ -152,7 +168,7 @@ func Describe() contract.AdapterDescribeResponse {
 				IdentityTemplate: "service_invoice.{external_id}",
 				Discoverable:     false,
 				DefaultActions: []string{
-					OpIssueNfse, OpGetNfseStatus, OpCancelNfse,
+					OpEnsureServiceInvoice, OpObserveServiceInvoices, OpDestroyServiceInvoice,
 					OpRetrievePDF, OpRetrieveXML, OpBulkIssue,
 				},
 			},
@@ -161,14 +177,14 @@ func Describe() contract.AdapterDescribeResponse {
 				CanonicalPrefix:  "thirdparty.nfeio.company",
 				IdentityTemplate: "company.{federal_tax_number}",
 				Discoverable:     false,
-				DefaultActions:   []string{OpRegisterCompany},
+				DefaultActions:   []string{OpEnsureCompany, OpObserveCompanies},
 			},
 			{
 				Name:             ResourceMunicipality,
 				CanonicalPrefix:  "thirdparty.nfeio.municipality",
 				IdentityTemplate: "municipality.{code}",
 				Discoverable:     false,
-				DefaultActions:   []string{OpListMunicipalities},
+				DefaultActions:   []string{OpObserveMunicipalities},
 			},
 			{
 				Name:             ResourceMunicipalityTemplate,
@@ -176,6 +192,15 @@ func Describe() contract.AdapterDescribeResponse {
 				IdentityTemplate: "municipality_template.{code}",
 				Discoverable:     false,
 				DefaultActions:   []string{OpManageTemplate, OpCalculateISS},
+			},
+			{
+				Name:             ResourceWebhookSubscription,
+				CanonicalPrefix:  "thirdparty.nfeio.webhook_subscription",
+				IdentityTemplate: "webhook_subscription.{id}",
+				Discoverable:     false,
+				DefaultActions: []string{
+					OpEnsureWebhookSubscription, OpObserveWebhookSubscriptions, OpDestroyWebhookSubscription,
+				},
 			},
 		},
 		ActionCatalog: actionCatalog(),
@@ -197,20 +222,38 @@ func Describe() contract.AdapterDescribeResponse {
 	}
 }
 
-// actionCatalog returns the 10 capabilities + reactor that describe wires up.
+// actionCatalog returns the v2.0.0 capability catalog: 14 callable ops + reactor.
+// Naming follows docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7 (Tier C nfe.io).
 // Each entry is also reflected in manifest/capability.*.yaml.
+//
+// Special cases retained:
+//   - `retrieve_pdf` / `retrieve_xml` — kept (allowlist, helper-shaped — file URL retrieval).
+//   - `manage_template` — kept (control-plane, not external resource).
+//   - `bulk_issue` — kept (bulk action — documented special case per spec).
+//   - `calculate_iss` — kept (allowlist — pure function).
 func actionCatalog() []contract.IntegrationActionDefinition {
 	return []contract.IntegrationActionDefinition{
-		{Name: OpIssueNfse, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Emit a NFSe via POST /v2/companies/{id}/serviceinvoices. Deduplicates on external_id. Municipality template provides ISS rate and service codes. 409 → duplicate=true."},
-		{Name: OpGetNfseStatus, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Fetch current status of an emitted NFSe."},
-		{Name: OpCancelNfse, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Cancel an emitted NFSe. 422 cancellation_window_closed is terminal."},
-		{Name: OpRetrievePDF, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve PDF download URL for an emitted NFSe."},
-		{Name: OpRetrieveXML, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve XML download URL for an emitted NFSe."},
-		{Name: OpRegisterCompany, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceCompany}, Description: "Register a company in NFe.io. 409 already_registered is idempotent success."},
-		{Name: OpListMunicipalities, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipality}, Description: "List municipalities supported by NFe.io. Cached 1h with stale-while-error fallback."},
-		{Name: OpManageTemplate, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Read-only manage_template: get, list, validate operations on in-memory município templates."},
-		{Name: OpBulkIssue, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Bulk-issue up to 50 NFSe with semaphore 5 and partial-failure semantics."},
-		{Name: OpCalculateISS, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Pure-function: compute ISS tax amount from municipality template and service amount."},
-		{Name: ReactorWebhookReceived, Category: "reactor", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Reactor: receives NFe.io webhook, dedupes, normalizes status, publishes to enterprise-payments.* queues."},
+		// service_invoice canonical triple (collapses issue_nfse / get_nfse_status / cancel_nfse).
+		{Name: OpEnsureServiceInvoice, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Ensure a service invoice exists for the given external_id. POST /v2/companies/{id}/serviceinvoices; 409 duplicate decoded into existing invoice envelope (idempotent success)."},
+		{Name: OpObserveServiceInvoices, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Read service invoices: with filter {id} returns one (GET /v2/companies/{id}/serviceinvoices/{id}); otherwise paginated GET /v2/companies/{id}/serviceinvoices."},
+		{Name: OpDestroyServiceInvoice, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Cancel (destroy) an emitted NFSe. PUT /v2/companies/{id}/serviceinvoices/{id}/cancel. 422 cancellation_window_closed is terminal failure; 404 → already-absent success."},
+		// File URL helpers (allowlisted).
+		{Name: OpRetrievePDF, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve signed PDF download URL for an emitted NFSe (allowlisted helper)."},
+		{Name: OpRetrieveXML, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve signed XML download URL for an emitted NFSe (allowlisted helper)."},
+		// company canonical triple (collapses register_company).
+		{Name: OpEnsureCompany, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceCompany}, Description: "Ensure a company exists at NFe.io for the given federal_tax_number. POSTs /v2/companies; 409 already_registered decoded into existing envelope (idempotent success)."},
+		{Name: OpObserveCompanies, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceCompany}, Description: "Read companies registered at NFe.io. Filter by {federal_tax_number} or paginate list."},
+		// municipality (read-only, renamed list_municipalities).
+		{Name: OpObserveMunicipalities, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipality}, Description: "List municipalities supported by NFe.io. Cached 1h with stale-while-error fallback."},
+		// Action-shaped helpers (kept by allowlist, see CLAUDE.md for rationale).
+		{Name: OpManageTemplate, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Read-only manage_template: get, list, validate operations on in-memory município templates (control-plane action, kept by allowlist)."},
+		{Name: OpBulkIssue, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Bulk-issue up to 50 NFSe with semaphore 5 and partial-failure semantics (documented bulk-action special case, kept by allowlist)."},
+		{Name: OpCalculateISS, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Pure-function helper: compute ISS tax amount from municipality template and service amount (allowlisted)."},
+		// webhook_subscription canonical triple (NEW in v2.0.0).
+		{Name: OpEnsureWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Ensure a webhook subscription exists at NFe.io for the given URL+events. POSTs /v2/webhooks; adopts existing if same URL+events; PATCHes deltas otherwise."},
+		{Name: OpObserveWebhookSubscriptions, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Read webhook subscriptions at NFe.io. Filter by {id} or paginate list (GET /v2/webhooks)."},
+		{Name: OpDestroyWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Destroy a webhook subscription. DELETE /v2/webhooks/{id}. 404 → already-absent success."},
+		// Reactor (NOT exposed via execute; triggered by inbound webhook HTTP server).
+		{Name: ReactorWebhookReceived, Category: "reactor", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Reactor: receives NFe.io webhook, HMAC-verifies, dedupes, normalizes status, publishes to enterprise-payments.* queues via publish_message capability."},
 	}
 }

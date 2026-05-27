@@ -23,11 +23,23 @@ func TestSpec_Describe_ReturnsAllCapabilitiesAndReactor(t *testing.T) {
 	if d.Provider != Provider {
 		t.Fatalf("describe.Provider = %q; want %q", d.Provider, Provider)
 	}
+	// v2.0.0 convention names per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7 (Tier C nfe.io).
 	want := map[string]bool{
-		"issue_nfse": true, "get_nfse_status": true, "cancel_nfse": true,
-		"retrieve_pdf": true, "retrieve_xml": true, "register_company": true,
-		"list_municipalities": true, "manage_template": true, "bulk_issue": true,
-		"calculate_iss": true, "nfse_webhook_received": true,
+		"ensure_service_invoice":        true,
+		"observe_service_invoices":      true,
+		"destroy_service_invoice":       true,
+		"retrieve_pdf":                  true,
+		"retrieve_xml":                  true,
+		"ensure_company":                true,
+		"observe_companies":             true,
+		"observe_municipalities":        true,
+		"manage_template":               true,
+		"bulk_issue":                    true,
+		"calculate_iss":                 true,
+		"ensure_webhook_subscription":   true,
+		"observe_webhook_subscriptions": true,
+		"destroy_webhook_subscription":  true,
+		"nfse_webhook_received":         true,
 	}
 	got := map[string]bool{}
 	for _, a := range d.ActionCatalog {
@@ -76,6 +88,40 @@ func TestMetrics_AllSpecRequiredAreRegistered(t *testing.T) {
 	}
 }
 
+// catalogNames returns a set of action_catalog entry names from Describe()
+// for use by the v2.0.0 convention tests.
+func catalogNames() map[string]bool {
+	desc := Describe()
+	got := map[string]bool{}
+	for _, a := range desc.ActionCatalog {
+		got[a.Name] = true
+	}
+	return got
+}
+
+func TestSpec_EnsureServiceInvoiceReplacesIssueNfse(t *testing.T) {
+	got := catalogNames()
+	if !got["ensure_service_invoice"] {
+		t.Error("expected ensure_service_invoice")
+	}
+	if got["issue_nfse"] {
+		t.Error("issue_nfse must be removed")
+	}
+}
+
+func TestSpec_ObserveServiceInvoicesMergesGetNfseStatus(t *testing.T) {
+	got := catalogNames()
+	if !got["observe_service_invoices"] {
+		t.Error("expected observe_service_invoices")
+	}
+	if got["get_nfse_status"] {
+		t.Error("get_nfse_status must be merged into observe_service_invoices")
+	}
+	if got["list_service_invoices"] {
+		t.Error("list_service_invoices must be removed (already merged)")
+	}
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {
@@ -83,11 +129,14 @@ func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 			t.Fatal("SupportedExecuteOperations must not include the reactor nfse_webhook_received")
 		}
 	}
-	// All 10 capabilities (including calculate_iss sub-cap) ARE in execute.
+	// v2.0.0: 14 callable capabilities (canonical triples + helpers + sub-caps).
 	wantExec := []string{
-		"issue_nfse", "get_nfse_status", "cancel_nfse", "retrieve_pdf",
-		"retrieve_xml", "register_company", "list_municipalities",
+		"ensure_service_invoice", "observe_service_invoices", "destroy_service_invoice",
+		"retrieve_pdf", "retrieve_xml",
+		"ensure_company", "observe_companies",
+		"observe_municipalities",
 		"manage_template", "bulk_issue", "calculate_iss",
+		"ensure_webhook_subscription", "observe_webhook_subscriptions", "destroy_webhook_subscription",
 	}
 	gotSet := map[string]bool{}
 	for _, op := range SupportedExecuteOperations {

@@ -65,9 +65,9 @@ func BulkIssue(ctx context.Context, cli *Client, templates map[string]*Municipio
 			defer func() { <-sem; wg.Done() }()
 			itemCtx, itemCancel := context.WithTimeout(ctx, 15*time.Second)
 			defer itemCancel()
-			// Each item still routes through issue_nfse for client metrics;
-			// the bulk_issue label is tracked via metricBulkIssueItems.
-			itemCtx = WithOp(itemCtx, OpIssueNfse)
+			// Each item still routes through ensure_service_invoice for client
+			// metrics; the bulk_issue label is tracked via metricBulkIssueItems.
+			itemCtx = WithOp(itemCtx, OpEnsureServiceInvoice)
 			out, err := IssueNFSe(itemCtx, cli, templates, item)
 			r := BulkIssueResult{Index: i, ExternalID: item.ExternalID}
 			if err != nil {
