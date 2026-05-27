@@ -130,6 +130,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpCalculateISS:
+			var in CalculateISSInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := CalculateISS(ctx, templates, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
