@@ -3,6 +3,8 @@ module github.com/dakasa-yggdrasil/integration-nfeio
 go 1.25.0
 
 require (
+	github.com/dakasa-yggdrasil/yggdrasil-sdk-go v0.4.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/prometheus/client_golang v1.20.5
 	go.uber.org/zap v1.27.0
 	gopkg.in/yaml.v3 v3.0.1

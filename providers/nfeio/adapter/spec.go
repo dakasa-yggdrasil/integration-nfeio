@@ -9,17 +9,29 @@ import (
 	"github.com/dakasa-yggdrasil/integration-nfeio/family/contract"
 )
 
-// Prometheus metrics shared across the adapter. Full set wired in
-// observability pass; this single gauge unblocks the client retry path.
+// Prometheus metrics shared across the adapter. Capability-side metrics
+// (request duration, error counter, bulk_issue item counter, template_load)
+// land in the observability finalization pass (Task 31); this initial set
+// unblocks the client retry path + the webhook server.
 var (
 	metricRateLimitRemaining = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "nfeio_rate_limit_remaining",
 		Help: "X-RateLimit-Remaining from last NFe.io response.",
 	})
+
+	metricWebhookReceived = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "nfeio_webhook_received_total",
+		Help: "Inbound webhooks by normalized status.",
+	}, []string{"status"})
+
+	metricDedupHits = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "nfeio_dedup_hits_total",
+		Help: "LRU dedup cache hits (duplicate webhook events).",
+	})
 )
 
 func init() {
-	prometheus.MustRegister(metricRateLimitRemaining)
+	prometheus.MustRegister(metricRateLimitRemaining, metricWebhookReceived, metricDedupHits)
 }
 
 const (
