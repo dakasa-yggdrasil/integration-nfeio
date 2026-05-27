@@ -13,6 +13,8 @@ spec:
     endpoints:
       describe: /rpc/describe
       execute: /rpc/execute
+    version: 2.0.0
+    timeout_seconds: 30
   credential_schema:
     mode: env
     required:
