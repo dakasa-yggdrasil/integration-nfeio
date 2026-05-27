@@ -1,0 +1,54 @@
+# Source-of-truth Kubernetes Service for integration-nfeio.
+#
+# Two ports MUST be exposed:
+#
+#   - 8080 (named "health")  — /healthz, /readyz, /metrics. Health
+#     server on the cfg.HealthPort (newHealthServer) bound in
+#     cmd/adapter/main.go.
+#
+#   - 8081 (named "rpc")     — /rpc/describe + /rpc/execute over
+#     HTTP-JSON transport. RPC_PORT in cmd/adapter/main.go:111
+#     (default "8081"). Yggdrasil-core's forward-drift / auto-sync
+#     reaches the adapter via this port through the in-cluster
+#     Service DNS name (integration-nfeio.yggdrasil-adapters.svc).
+#
+# Pre-2.2.3 the live Service only declared port 8080. forward-drift
+# auto-sync failed with "connection refused" when describing the
+# adapter via Service DNS, because port 8081 was unrouted. The
+# Phase C agent worked around this with `kubectl exec deploy/yggdrasil
+# -- wget` against the pod IP; that path is NOT a fix — apply this
+# manifest on next deploy so Service routing works at source.
+#
+# AMQP transport (YGGDRASIL_TRANSPORT=amqp / rabbitmq) does NOT need
+# port 8081 to be reachable — the AMQP path consumes from a broker
+# queue. But HTTP-JSON is the default transport for this adapter,
+# and forward-drift auto-sync uses the HTTP describe endpoint regardless.
+#
+# Webhook port 8082 (NFe.io inbound callbacks — HMAC-verified) is
+# deliberately NOT included in this Service. The webhook path is
+# routed through the cluster ingress to the dedicated webhook
+# listener; see providers/nfeio/adapter/webhook_server.go.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: integration-nfeio
+  namespace: yggdrasil-adapters
+  labels:
+    app.kubernetes.io/name: integration-nfeio
+    app.kubernetes.io/component: adapter
+    yggdrasil.io/integration-family: nfeio
+    yggdrasil.io/integration-type: nfeio
+spec:
+  type: ClusterIP
+  selector:
+    app: integration-nfeio
+  ports:
+    - name: health
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: rpc
+      port: 8081
+      targetPort: 8081
+      protocol: TCP

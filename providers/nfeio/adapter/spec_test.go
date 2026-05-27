@@ -178,6 +178,29 @@ func TestSpec_NfeioWebhookSubscriptionResourceType(t *testing.T) {
 	t.Fatal("webhook_subscription resource_type missing")
 }
 
+// TestSpec_CredentialSchemaModeIsInline locks the credential schema
+// mode to "inline" — the only value Yggdrasil core's Phase 1 manifest
+// validator accepts. Pre-v2.2.2 the spec advertised "env" which
+// forced a manual hand-patch on every re-register (caught Phase C
+// 2026-05-27 smoke). The Required env-var names are still declared
+// so downstream tooling knows what to bind from secret stores.
+func TestSpec_CredentialSchemaModeIsInline(t *testing.T) {
+	d := Describe()
+	if got := d.CredentialSchema.Mode; got != "inline" {
+		t.Fatalf("CredentialSchema.Mode = %q; want %q (Yggdrasil core only accepts inline; see Phase 1 validator)", got, "inline")
+	}
+	wantRequired := map[string]bool{"NFEIO_API_KEY": true, "NFEIO_WEBHOOK_SECRET": true}
+	gotRequired := map[string]bool{}
+	for _, k := range d.CredentialSchema.Required {
+		gotRequired[k] = true
+	}
+	for k := range wantRequired {
+		if !gotRequired[k] {
+			t.Errorf("CredentialSchema.Required missing %q", k)
+		}
+	}
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {

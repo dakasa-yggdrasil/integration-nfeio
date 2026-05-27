@@ -1,5 +1,42 @@
 # Changelog
 
+## v2.2.3 — 2026-05-27
+
+### Fixed
+
+- **`Describe().CredentialSchema.Mode`** drift: was `"env"`, must be
+  `"inline"`. Yggdrasil core's Phase 1 manifest validator only
+  accepts `inline` (or `none`); `env` triggered a registration
+  rejection that forced a manual hand-patch on every re-register
+  (caught by the SDK v0.8.0 Phase C smoke). The manifest YAML
+  (`manifest/integration_type.nfeio.yaml`) already declared
+  `mode: inline` — only the source `spec.go` was drifted, so the
+  spec.go ↔ YAML mismatch could survive a clean rebuild. New
+  `TestSpec_CredentialSchemaModeIsInline` locks the wire-advertised
+  value to prevent regression.
+- Note: the `Required` array (`NFEIO_API_KEY`,
+  `NFEIO_WEBHOOK_SECRET`) is preserved verbatim — the SCHEMA mode
+  switches; the required-key list is unchanged. Downstream tooling
+  that binds env vars from secret-store entries reads `Required`
+  identically across `inline` and `env` modes.
+- **K8s Service rpc port missing** — added explicit
+  `deploy/service.yaml` declaring two named ports (8080 health, 8081
+  rpc). Pre-2.2.3 the live Service only exposed 8080, so
+  yggdrasil-core forward-drift auto-sync hit "connection refused"
+  reaching `/rpc/describe` via service DNS. The Phase C agent worked
+  around this with `kubectl exec deploy/yggdrasil -- wget` against
+  the pod IP — not a fix. Apply the manifest via `apply_manifest`
+  workflow on next deploy. Container ports 8080 + 8081 are already
+  what `cmd/adapter/main.go` binds to (RPC_PORT default 8081,
+  HealthPort default 8080); this manifest aligns Service routing.
+
+### Changed
+
+- **Bumped `yggdrasil-sdk-go` v0.8.0 → v0.8.1**. The SDK patch closes
+  the destroy resource_id inference gap so `nfeio.<resource>.destroyed`
+  events land in `event_log` with the correct identifier (was
+  silently dropped with HTTP 400 from yggdrasil-core).
+
 ## v2.2.1 — 2026-05-27
 
 ### Changed
