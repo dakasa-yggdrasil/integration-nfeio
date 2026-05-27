@@ -67,6 +67,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpRetrievePDF:
+			var in RetrieveDocInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := RetrievePDF(ctx, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -253,6 +263,48 @@ func CancelNFSe(ctx context.Context, cli *Client, in CancelNFSeInput) (*CancelNF
 		Status:      raw.Status,
 		FlowMessage: raw.FlowMessage,
 	}, nil
+}
+
+// RetrieveDocInput selects an invoice document (PDF or XML) by ID.
+type RetrieveDocInput struct {
+	CompanyID string `json:"company_id,omitempty"`
+	InvoiceID string `json:"invoice_id"`
+}
+
+// RetrieveDocOutput carries the signed download URL plus optional
+// expiration timestamp.
+type RetrieveDocOutput struct {
+	URL       string `json:"url"`
+	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+// RetrievePDF GETs /v2/companies/{id}/serviceinvoices/{invoice_id}/pdf.
+// NFe.io returns a JSON body with documentUrl pointing at a signed S3 URL.
+func RetrievePDF(ctx context.Context, cli *Client, in RetrieveDocInput) (*RetrieveDocOutput, error) {
+	return retrieveDoc(ctx, cli, in, "pdf")
+}
+
+func retrieveDoc(ctx context.Context, cli *Client, in RetrieveDocInput, kind string) (*RetrieveDocOutput, error) {
+	companyID := in.CompanyID
+	if companyID == "" {
+		companyID = cli.cfg.CompanyID
+	}
+	if companyID == "" {
+		return nil, errors.New("company_id required (no instance default)")
+	}
+	var raw struct {
+		DocumentURL string `json:"documentUrl"`
+		ExpiresAt   string `json:"expiresAt"`
+	}
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/%s", companyID, in.InvoiceID, kind)
+	if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := &RetrieveDocOutput{URL: raw.DocumentURL, ExpiresAt: raw.ExpiresAt}
+	if out.URL == "" {
+		return nil, fmt.Errorf("retrieve_%s: empty documentUrl", kind)
+	}
+	return out, nil
 }
 
 func firstNonEmpty(vals ...string) string {
