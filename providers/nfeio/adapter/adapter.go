@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/rpc"
+	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/reconcile"
 	"go.uber.org/zap"
 )
 
@@ -25,22 +27,51 @@ func DescribeHandler(logger *zap.Logger) sdkadapter.Handler {
 	}
 }
 
-// ExecuteHandler returns the SDK-shape execute handler. Routes by op name;
-// the reactor (nfse_webhook_received) is intentionally NOT routed here —
-// it is triggered exclusively by the webhook HTTP server.
+// ExecuteHandler returns the SDK-shape execute handler. Production
+// wiring (v2.2.0+): routes inbound envelopes through reconcile.Dispatch
+// first — activating §6.5 mutation event auto-emission via the
+// WireReconcilersWithInstance-installed dispatch table. Operations
+// not registered with a Reconciler (retrieve_pdf, retrieve_xml,
+// manage_template, bulk_issue, calculate_iss, observe_municipalities,
+// legacy aliases) fall back to executeRoute. The reactor
+// (nfse_webhook_received) is intentionally NOT routed here — it is
+// triggered exclusively by the webhook HTTP server.
 func ExecuteHandler(
 	logger *zap.Logger,
+	a *sdkadapter.Adapter,
 	cli *Client,
 	templates map[string]*MunicipioTemplate,
 	deps *ExecuteDeps,
 ) sdkadapter.Handler {
 	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
+		body, _, dispatchErr := reconcile.Dispatch(ctx, a, d)
+		if dispatchErr == nil {
+			return body, "application/json", nil
+		}
+		if !isUnsupportedReconcileOp(dispatchErr) {
+			return nil, "", dispatchErr
+		}
+		// Operation not registered through RegisterReconciler — fall
+		// back to the legacy executeRoute (action helpers, legacy
+		// aliases, observe_municipalities cache flow).
 		body, err := executeRoute(ctx, cli, templates, deps, d.Body)
 		if err != nil {
 			return nil, "", err
 		}
 		return body, "application/json", nil
 	}
+}
+
+// isUnsupportedReconcileOp matches the SDK's "unsupported operation"
+// signal so the bridge falls back to the legacy switch instead of
+// surfacing the error to callers.
+func isUnsupportedReconcileOp(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "reconcile: unsupported operation") ||
+		strings.Contains(msg, "reconcile: adapter has no registered Reconciler")
 }
 
 // executeRoute is the pure operation-dispatcher shared between the SDK

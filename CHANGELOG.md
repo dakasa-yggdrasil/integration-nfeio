@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.2.0 — 2026-05-27
+
+### Changed
+
+- Bump yggdrasil-sdk-go v0.6.0 → v0.7.0 to pick up the public
+  `reconcile.Dispatch` API.
+- Production runtime migrated to `reconcile.Dispatch`.
+  `cmd/adapter/main.go` calls `WireReconcilersWithInstance(a, cli,
+  templates, "")` BEFORE the `Register("execute", ...)` chain;
+  `ExecuteHandler` routes inbound envelopes through
+  `reconcile.Dispatch` first and falls back to the legacy
+  `executeRoute` switch only for ops outside the
+  ensure_/observe_/destroy_ triples — retrieve_pdf, retrieve_xml,
+  manage_template, bulk_issue, calculate_iss, observe_municipalities
+  (cache-backed), and the pre-v2.0.0 legacy aliases (issue_nfse,
+  get_nfse_status, cancel_nfse, register_company, list_municipalities).
+- §6.5 mutation event auto-emission is now LIVE for production
+  traffic (previously TEST-ONLY) when `YGGDRASIL_CORE_URL`
+  + `YGGDRASIL_RUN_TOKEN` are wired in the cluster manifest.
+- `ExecuteHandler` signature now accepts `*sdkadapter.Adapter`
+  alongside the logger / client / templates / deps.
+
 ## v2.1.0 — 2026-05-27
 
 ### Added
