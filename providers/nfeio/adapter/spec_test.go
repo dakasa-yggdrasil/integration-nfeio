@@ -132,6 +132,29 @@ func TestSpec_DestroyServiceInvoiceReplacesCancelNfse(t *testing.T) {
 	}
 }
 
+func TestSpec_EnsureCompanyReplacesRegisterCompany(t *testing.T) {
+	got := catalogNames()
+	if !got["ensure_company"] {
+		t.Error("expected ensure_company")
+	}
+	if got["register_company"] {
+		t.Error("register_company must be removed")
+	}
+	if !got["observe_companies"] {
+		t.Error("expected observe_companies (list-by-CNPJ)")
+	}
+}
+
+func TestSpec_ObserveMunicipalitiesReplacesListMunicipalities(t *testing.T) {
+	got := catalogNames()
+	if !got["observe_municipalities"] {
+		t.Error("expected observe_municipalities")
+	}
+	if got["list_municipalities"] {
+		t.Error("list_municipalities must be removed")
+	}
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {
