@@ -1,0 +1,7 @@
+.git
+.github
+integration_tests
+*_test.go
+README.md
+CLAUDE.md
+AGENTS.md
