@@ -90,6 +90,28 @@ func main() {
 		Register("describe", ad.DescribeHandler(logger)).
 		Register("execute", ad.ExecuteHandler(logger, cli, templates, deps))
 
+	// v2.0.0 note: the hand-written ExecuteHandler above carries the
+	// canonical capability triples (ensure_service_invoice /
+	// observe_service_invoices / destroy_service_invoice + ensure_company
+	// / observe_companies + observe_municipalities + ensure_webhook_subscription
+	// / observe_webhook_subscriptions / destroy_webhook_subscription) AND
+	// the helpers that fall outside the convention (retrieve_pdf,
+	// retrieve_xml, manage_template, bulk_issue, calculate_iss) AND the
+	// pre-v2.0.0 legacy compat cases (issue_nfse, get_nfse_status,
+	// cancel_nfse, register_company, list_municipalities). It is the
+	// single dispatch path for production traffic.
+	//
+	// The SDK reconcile.RegisterReconciler bindings (providers/nfeio/adapter/reconcilers.go)
+	// expose the same Reconciler[D,O] surface for callers that prefer the
+	// typed SDK path; they are exercised in tests and document the
+	// canonical resource→handler mapping per
+	// docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7.
+	// They are NOT wired into the runtime here because RegisterReconciler
+	// installs its own "execute" handler that would overwrite the
+	// hand-written one and lose dispatch for the non-resource helpers.
+	// SDK v0.6.0 (with a switch-routing primitive or composable handlers)
+	// is the migration target for unifying both paths.
+
 	// 1) RPC transport (HTTP or AMQP) — selected at startup.
 	switch transport := strings.ToLower(strings.TrimSpace(os.Getenv("YGGDRASIL_TRANSPORT"))); transport {
 	case "", "http", "http_json":
