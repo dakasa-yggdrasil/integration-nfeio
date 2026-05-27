@@ -1,0 +1,34 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: issue_nfse
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [service_invoice]
+  description: >
+    Emit a NFSe via POST /v2/companies/{id}/serviceinvoices.
+    Deduplicates on external_id. Municipality template provides
+    ISS rate and service codes. 409 → metadata.duplicate=true.
+  input_schema:
+    type: object
+    required: [municipio_code, external_id, borrower_name, borrower_federal_tax_number, borrower_address, service_amount, description]
+    properties:
+      company_id:                       {type: string}
+      municipio_code:                   {type: string}
+      external_id:                      {type: string}
+      borrower_name:                    {type: string}
+      borrower_federal_tax_number:      {type: integer}
+      borrower_municipal_tax_number:    {type: string}
+      borrower_tax_regime:              {type: string}
+      borrower_address:                 {type: object}
+      borrower_email:                   {type: string}
+      service_amount:                   {type: number}
+      description:                      {type: string}
+      issued_on:                        {type: string}
+      rps_serial_number:                {type: string}
+      additional_information:           {type: string}
+      deductions_amount:                {type: number}
+      discount_unconditioned_amount:    {type: number}

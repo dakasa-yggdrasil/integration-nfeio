@@ -1,0 +1,20 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: list_municipalities
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [municipality]
+  description: >
+    GET /v2/municipalities. Returns the paged list of municipalities
+    supported by NFe.io. Cached 1h per (state_code, page, page_size);
+    upstream errors trigger stale-while-error fallback.
+  input_schema:
+    type: object
+    properties:
+      state_code: {type: string}
+      page:       {type: integer, default: 1}
+      page_size:  {type: integer, default: 100}

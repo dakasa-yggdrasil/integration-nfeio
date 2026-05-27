@@ -1,0 +1,27 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: bulk_issue
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [service_invoice]
+  description: >
+    Bulk-issue up to 50 NFSe via concurrent IssueNFSe calls (semaphore=5).
+    Partial failures are NOT errors — results carry per-item status with
+    succeeded_count + failed_count. > 50 items returns terminal
+    input_too_large.
+  input_schema:
+    type: object
+    required: [items]
+    properties:
+      company_id: {type: string}
+      fail_fast:  {type: boolean}
+      items:
+        type: array
+        maxItems: 50
+        items:
+          type: object
+          required: [municipio_code, external_id, borrower_name, borrower_federal_tax_number, borrower_address, service_amount, description]

@@ -1,0 +1,23 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: calculate_iss
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [municipality_template]
+  description: >
+    Pure-function sub-capability: compute ISS tax amount from the
+    município template's iss_rate (or an override) and a service amount.
+    base = max(0, service_amount - deductions); tax = base * rate.
+    No network call.
+  input_schema:
+    type: object
+    required: [municipio_code, service_amount]
+    properties:
+      municipio_code:    {type: string}
+      service_amount:    {type: number}
+      iss_rate_override: {type: number}
+      deductions_amount: {type: number}

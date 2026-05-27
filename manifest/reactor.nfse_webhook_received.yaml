@@ -1,0 +1,25 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: nfse_webhook_received
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: reactor
+  idempotent: true
+  resource_types: [service_invoice]
+  description: >
+    Reactor: receives NFe.io webhook on /webhook/nfeio (HMAC-SHA256
+    via X-Hub-Signature-256), dedupes (LRU(4096) by event id with
+    body-hash fallback), normalizes status to {issued|cancelled|
+    processing_failed}, and publishes via publish_message on the
+    rabbitmq-topology instance to enterprise-payments.nfe.{emitted,
+    canceled, rejected}.q.
+  triggered_by:
+    transport: http
+    path: /webhook/nfeio
+    port: 8082
+  emits:
+    - queue: enterprise-payments.nfe.emitted.q
+    - queue: enterprise-payments.nfe.rejected.q
+    - queue: enterprise-payments.nfe.canceled.q

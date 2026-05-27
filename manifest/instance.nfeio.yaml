@@ -1,0 +1,19 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: integration_instance
+metadata:
+  name: nfeio-dakasa
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  endpoint: http://integration-nfeio.yggdrasil-adapters.svc.cluster.local:8081
+  credentials:
+    NFEIO_API_KEY:
+      source: aws_secrets_manager
+      path: dakasa/prod/nfeio-api-key
+    NFEIO_WEBHOOK_SECRET:
+      source: aws_secrets_manager
+      path: dakasa/prod/nfeio-webhook-secret
+  config:
+    NFEIO_BASE_URL: "https://api.nfe.io"
+    NFEIO_COMPANY_ID: ""   # set per binding when known
+    RABBITMQ_TOPOLOGY_INSTANCE: rabbitmq-topology-default

@@ -1,0 +1,63 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: integration_type
+metadata:
+  name: nfeio
+  namespace: dakasa
+spec:
+  provider: nfeio
+  version: 1.0.0
+  adapter:
+    image_repo: ghcr.io/dakasa-yggdrasil/integration-nfeio
+    image_tag: v1.0.0
+    transport: http_json
+    endpoints:
+      describe: /rpc/describe
+      execute: /rpc/execute
+  credential_schema:
+    mode: env
+    required: [NFEIO_API_KEY, NFEIO_WEBHOOK_SECRET]
+  action_catalog:
+    - name: issue_nfse
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: get_nfse_status
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: cancel_nfse
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: retrieve_pdf
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: retrieve_xml
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: register_company
+      category: capability
+      idempotent: true
+      resource_types: [company]
+    - name: list_municipalities
+      category: capability
+      idempotent: true
+      resource_types: [municipality]
+    - name: manage_template
+      category: capability
+      idempotent: true
+      resource_types: [municipality_template]
+    - name: bulk_issue
+      category: capability
+      idempotent: true
+      resource_types: [service_invoice]
+    - name: calculate_iss
+      category: capability
+      idempotent: true
+      resource_types: [municipality_template]
+    - name: nfse_webhook_received
+      category: reactor
+      idempotent: true
+      resource_types: [service_invoice]

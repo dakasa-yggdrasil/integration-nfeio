@@ -1,0 +1,21 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: manage_template
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [municipality_template]
+  description: >
+    Read-only operations on the in-memory município template catalog.
+    Operation must be one of: get (by municipio_code), list (summary),
+    validate (against a candidate YAML). v1.0.0 has no create/update/delete.
+  input_schema:
+    type: object
+    required: [operation]
+    properties:
+      operation:      {type: string, enum: [get, list, validate]}
+      municipio_code: {type: string}
+      yaml_content:   {type: string}

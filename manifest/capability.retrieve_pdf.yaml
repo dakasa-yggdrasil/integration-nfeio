@@ -1,0 +1,19 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: capability
+metadata:
+  name: retrieve_pdf
+  namespace: dakasa
+spec:
+  integration_type: nfeio
+  category: capability
+  idempotent: true
+  resource_types: [service_invoice]
+  description: >
+    GET /v2/companies/{id}/serviceinvoices/{invoice_id}/pdf. Returns the
+    signed S3 download URL (documentUrl) plus optional expiration.
+  input_schema:
+    type: object
+    required: [invoice_id]
+    properties:
+      company_id: {type: string}
+      invoice_id: {type: string}
