@@ -47,6 +47,16 @@ func ExecuteHandler(
 				return nil, err
 			}
 			return json.Marshal(out)
+		case OpGetNfseStatus:
+			var in GetNFSeStatusInput
+			if err := json.Unmarshal(env.Input, &in); err != nil {
+				return nil, err
+			}
+			out, err := GetNFSeStatus(ctx, cli, in)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(out)
 		default:
 			return nil, fmt.Errorf("unknown operation %q", env.Operation)
 		}
@@ -166,6 +176,33 @@ func IssueNFSe(ctx context.Context, cli *Client, templates map[string]*Municipio
 		return out, nil
 	}
 	return nil, err
+}
+
+// GetNFSeStatusInput selects an invoice by ID, optionally overriding the
+// company at call time.
+type GetNFSeStatusInput struct {
+	CompanyID string `json:"company_id,omitempty"`
+	InvoiceID string `json:"invoice_id"`
+}
+
+// GetNFSeStatus GETs /v2/companies/{id}/serviceinvoices/{invoice_id}.
+// NFe.io returns the canonical invoice envelope (same shape as POST), so
+// we reuse IssueNFSeOutput for the response. 404 surfaces as a terminal
+// *NfeIoAPIError so the caller can distinguish missing from transient.
+func GetNFSeStatus(ctx context.Context, cli *Client, in GetNFSeStatusInput) (*IssueNFSeOutput, error) {
+	companyID := in.CompanyID
+	if companyID == "" {
+		companyID = cli.cfg.CompanyID
+	}
+	if companyID == "" {
+		return nil, errors.New("company_id required (no instance default)")
+	}
+	out := &IssueNFSeOutput{}
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s", companyID, in.InvoiceID)
+	if err := cli.do(ctx, http.MethodGet, path, nil, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func firstNonEmpty(vals ...string) string {
