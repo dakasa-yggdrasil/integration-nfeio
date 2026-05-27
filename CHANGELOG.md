@@ -1,5 +1,36 @@
 # Changelog
 
+## v2.1.0 — 2026-05-27
+
+### Added
+
+- Bump yggdrasil-sdk-go v0.5.0 → v0.6.0 to pick up the additive
+  `sdk/events` package + the new `reconcile.WithEmitter` /
+  `WithProvider` / `WithInstanceID` options.
+- `WireReconcilers` now wires a §6.5 mutation-event emitter via
+  `events.NewHTTPEmitter()` when `YGGDRASIL_CORE_URL` is set; degrades
+  to `events.NoopEmitter{}` otherwise. Successful `Ensure()` /
+  `Destroy()` invocations auto-emit `nfeio.<resource>.ensured` /
+  `nfeio.<resource>.destroyed` events to yggdrasil-core
+  `POST /api/v1/events` per INTEGRATION_CONTRACT.md §6.5.
+- New `WireReconcilersWithInstance` variant accepting an instanceID
+  so multi-tenant `MutationEvent.InstanceID` is preserved; the
+  legacy single-arg `WireReconcilers` keeps signature stability by
+  delegating with `instanceID=""`.
+- Emitter is env-driven (`YGGDRASIL_CORE_URL` + `YGGDRASIL_RUN_TOKEN`)
+  so the adapter stays Lego-compliant — no broker / secret-store /
+  cloud is hardcoded.
+
+### Notes
+
+- Production `cmd/adapter/main.go` continues to use the hand-written
+  `executeRoute` switch as the runtime dispatch path; emission
+  activates when the runtime moves onto SDK reconcile dispatch in a
+  follow-up cycle (SDK v0.6.0 ships the composable-handler primitive
+  noted in the v2.0.0 changelog).
+- Best-effort emission: failed posts log WARN but do not fail the
+  capability call.
+
 ## v2.0.0 — 2026-05-27
 
 Universal capability naming convention adoption (per

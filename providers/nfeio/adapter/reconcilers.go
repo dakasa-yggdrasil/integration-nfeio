@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
+	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/events"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/reconcile"
 )
 
@@ -150,19 +152,55 @@ func (r *webhookSubReconciler) Destroy(ctx context.Context, ref string) error {
 // They are removed at SDK v0.6.0; adapters dropping the shim should also
 // remove the legacy cases in executeRoute.
 func WireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate) {
+	WireReconcilersWithInstance(a, cli, templates, "")
+}
+
+// WireReconcilersWithInstance is the v0.6.0 variant accepting an
+// instanceID so emitted MutationEvents carry the multi-tenant scope.
+// Callers that already know the integration_instance label (e.g. the
+// hand-written executeRoute when migrated) should prefer this form.
+// When instanceID is empty, the SDK forwards an empty string into
+// MutationEvent.InstanceID and the receiver can fall back to any
+// envelope-scoped label.
+func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string) {
+	emitter := newEmitterFromEnv()
+	commonOpts := []reconcile.Option{
+		reconcile.WithProvider(Provider),
+		reconcile.WithEmitter(emitter),
+		reconcile.WithInstanceID(instanceID),
+	}
+
 	reconcile.RegisterReconciler[serviceInvoiceDesired, serviceInvoiceObserved](
 		a, "service_invoice", "service_invoices",
 		newServiceInvoiceReconciler(cli, templates),
-		reconcile.WithLegacyNames("issue_nfse", "get_nfse_status", "cancel_nfse", "list_service_invoices"),
+		append(commonOpts,
+			reconcile.WithLegacyNames("issue_nfse", "get_nfse_status", "cancel_nfse", "list_service_invoices"),
+		)...,
 	)
 	reconcile.RegisterReconciler[companyDesired, companyObserved](
 		a, "company", "companies",
 		newCompanyReconciler(cli),
-		reconcile.WithLegacyNames("register_company", "update_company"),
+		append(commonOpts,
+			reconcile.WithLegacyNames("register_company", "update_company"),
+		)...,
 	)
 	reconcile.RegisterReconciler[webhookSubDesired, webhookSubObserved](
 		a, "webhook_subscription", "webhook_subscriptions",
 		newWebhookSubReconciler(cli),
-		reconcile.WithLegacyNames("create_webhook_endpoint", "delete_webhook_endpoint", "list_webhook_endpoints"),
+		append(commonOpts,
+			reconcile.WithLegacyNames("create_webhook_endpoint", "delete_webhook_endpoint", "list_webhook_endpoints"),
+		)...,
 	)
+}
+
+// newEmitterFromEnv returns an events.Emitter wired to yggdrasil-core
+// when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. Env-driven
+// keeps the Lego principle (no broker / secret-store / cloud is
+// hardcoded). Emission is best-effort per reconcile.WithEmitter
+// docstring — failures log WARN but do not fail the capability call.
+func newEmitterFromEnv() events.Emitter {
+	if os.Getenv(events.EnvCoreURL) == "" {
+		return &events.NoopEmitter{}
+	}
+	return events.NewHTTPEmitter()
 }
