@@ -5,6 +5,13 @@ metadata:
   namespace: global
 spec:
   provider: nfeio
+  # INTEGRATION_CONTRACT §17 — adapter self-declares its purpose.
+  # NFE.io issues fiscal documents (NFSe service invoices, bulk emission).
+  domain: payments
+  # Provider-side management UI. Surfaces render an "Abrir NFE.io" CTA.
+  dashboard:
+    url: https://app.nfe.io
+    label: "Abrir NFE.io"
   version: 2.0.0
   adapter:
     image_repo: ghcr.io/dakasa-yggdrasil/integration-nfeio
