@@ -201,6 +201,41 @@ func TestSpec_CredentialSchemaModeIsInline(t *testing.T) {
 	}
 }
 
+// TestSpec_UIMetadata_Section15 verifies §15 INTEGRATION_CONTRACT.md
+// compliance: every property in credential_schema MUST carry UI metadata
+// (label, group, order) so surfaces render forms generically without
+// per-provider hardcoded knowledge.
+func TestSpec_UIMetadata_Section15(t *testing.T) {
+	d := Describe()
+	for name, prop := range d.CredentialSchema.Properties {
+		if prop.Label == "" {
+			t.Errorf("CredentialSchema[%q]: missing Label (§15)", name)
+		}
+		if prop.LabelLocale == nil || prop.LabelLocale["pt-BR"] == "" || prop.LabelLocale["en-US"] == "" {
+			t.Errorf("CredentialSchema[%q]: missing LabelLocale pt-BR/en-US (§15)", name)
+		}
+		if prop.Group == "" {
+			t.Errorf("CredentialSchema[%q]: missing Group (§15)", name)
+		}
+		if prop.Order == 0 {
+			t.Errorf("CredentialSchema[%q]: missing Order (§15)", name)
+		}
+		// Sensitive defaults true for credentials.
+		if !prop.Sensitive {
+			t.Errorf("CredentialSchema[%q]: credential should be Sensitive=true (§15)", name)
+		}
+	}
+	// instance schema also gets metadata.
+	for name, prop := range d.InstanceSchema.Properties {
+		if prop.Label == "" {
+			t.Errorf("InstanceSchema[%q]: missing Label (§15)", name)
+		}
+		if prop.Group == "" {
+			t.Errorf("InstanceSchema[%q]: missing Group (§15)", name)
+		}
+	}
+}
+
 func TestSpec_SupportedExecuteOperations_ExcludesReactor(t *testing.T) {
 	// Reactor (nfse_webhook_received) is NOT exposed via RPC execute.
 	for _, op := range SupportedExecuteOperations {

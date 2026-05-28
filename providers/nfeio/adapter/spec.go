@@ -74,7 +74,7 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "2.2.4"
+	AdapterVersion  = "2.3.0"
 
 	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
 	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
@@ -157,9 +157,68 @@ func Describe() contract.AdapterDescribeResponse {
 		CredentialSchema: contract.IntegrationSchemaSpec{
 			Mode:     "inline",
 			Required: []string{"NFEIO_API_KEY", "NFEIO_WEBHOOK_SECRET"},
+			Properties: map[string]contract.IntegrationSchemaProperty{
+				"NFEIO_API_KEY": {
+					Type:        "string",
+					Label:       "NFe.io API key",
+					LabelLocale: map[string]string{"pt-BR": "Chave da API NFe.io", "en-US": "NFe.io API key"},
+					Placeholder: "Cole a API key gerada no painel NFe.io",
+					PlaceholderLocale: map[string]string{
+						"pt-BR": "Cole a API key gerada no painel NFe.io",
+						"en-US": "Paste the API key generated in the NFe.io dashboard",
+					},
+					Description: "API key gerada em NFe.io → Configurações → API. Usada para todas as chamadas REST autenticadas.",
+					DescriptionLocale: map[string]string{
+						"pt-BR": "Encontre em NFe.io → Configurações → API. Necessária para autenticar chamadas REST.",
+						"en-US": "Find in NFe.io → Settings → API. Used to authenticate REST calls.",
+					},
+					Group:       "NFe.io credentials",
+					GroupLocale: map[string]string{"pt-BR": "Credenciais NFe.io", "en-US": "NFe.io credentials"},
+					Order:       1,
+					Sensitive:   true,
+					Secret:      true,
+				},
+				"NFEIO_WEBHOOK_SECRET": {
+					Type:        "string",
+					Label:       "Webhook HMAC secret",
+					LabelLocale: map[string]string{"pt-BR": "Segredo HMAC do webhook", "en-US": "Webhook HMAC secret"},
+					Placeholder: "Segredo configurado no webhook NFe.io",
+					PlaceholderLocale: map[string]string{
+						"pt-BR": "Segredo configurado no webhook NFe.io",
+						"en-US": "Secret configured on the NFe.io webhook",
+					},
+					Description: "Segredo HMAC usado para validar webhooks recebidos da NFe.io. Configurado em NFe.io → Webhooks.",
+					DescriptionLocale: map[string]string{
+						"pt-BR": "Segredo HMAC usado para validar webhooks recebidos. Configurado em NFe.io → Webhooks.",
+						"en-US": "HMAC secret used to verify inbound webhooks. Set in NFe.io → Webhooks.",
+					},
+					Group:       "NFe.io credentials",
+					GroupLocale: map[string]string{"pt-BR": "Credenciais NFe.io", "en-US": "NFe.io credentials"},
+					Order:       2,
+					Sensitive:   true,
+					Secret:      true,
+				},
+			},
 		},
 		InstanceSchema: contract.IntegrationSchemaSpec{
 			Mode: "inline",
+			Properties: map[string]contract.IntegrationSchemaProperty{
+				"environment": {
+					Type:        "string",
+					Label:       "NFe.io environment",
+					LabelLocale: map[string]string{"pt-BR": "Ambiente NFe.io", "en-US": "NFe.io environment"},
+					Description: "Ambiente alvo da API NFe.io. Use sandbox para homologação.",
+					DescriptionLocale: map[string]string{
+						"pt-BR": "Ambiente alvo da API. Use sandbox para homologação.",
+						"en-US": "Target environment. Use sandbox for staging.",
+					},
+					Group:       "Runtime configuration",
+					GroupLocale: map[string]string{"pt-BR": "Configuração de runtime", "en-US": "Runtime configuration"},
+					Order:       1,
+					Enum:        []any{"production", "sandbox"},
+					Default:     "production",
+				},
+			},
 		},
 		ResourceTypes: []contract.IntegrationResourceType{
 			{

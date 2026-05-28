@@ -55,12 +55,40 @@ type IntegrationSchemaSpec struct {
 }
 
 // IntegrationSchemaProperty is one field in a schema spec.
+//
+// §15 of INTEGRATION_CONTRACT.md (shipped 2026-05-27): adapter manifests
+// MUST carry UI metadata so surfaces render generic forms WITHOUT per-provider
+// hardcoded knowledge. All UI metadata fields are optional and omitempty —
+// the wire stays backward-compatible with older yggdrasil-core releases.
 type IntegrationSchemaProperty struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
 	Secret      bool   `json:"secret,omitempty"`
 	Enum        []any  `json:"enum,omitempty"`
 	Default     any    `json:"default,omitempty"`
+
+	// UI metadata (§15) — drives generic form rendering in surfaces.
+	Label             string                       `json:"label,omitempty"`
+	LabelLocale       map[string]string            `json:"label_locale,omitempty"`
+	Placeholder       string                       `json:"placeholder,omitempty"`
+	PlaceholderLocale map[string]string            `json:"placeholder_locale,omitempty"`
+	DescriptionLocale map[string]string            `json:"description_locale,omitempty"`
+	Group             string                       `json:"group,omitempty"`
+	GroupLocale       map[string]string            `json:"group_locale,omitempty"`
+	Order             int                          `json:"order,omitempty"`
+	Sensitive         bool                         `json:"sensitive,omitempty"`
+	DependsOn         *IntegrationSchemaDependency `json:"depends_on,omitempty"`
+	Format            string                       `json:"format,omitempty"`
+}
+
+// IntegrationSchemaDependency expresses a conditional-visibility relationship
+// between two properties on the same schema. The dependent property is shown
+// (and required, if its `required` flag is set) only when the referenced
+// Field has the specified Value in the current form state. Surfaces consume
+// this to drive show/hide logic without per-provider hardcoded branches.
+type IntegrationSchemaDependency struct {
+	Field string `json:"field"`
+	Value any    `json:"value"`
 }
 
 // IntegrationResourceType declares one resource the adapter operates on.
