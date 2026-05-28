@@ -1,0 +1,23 @@
+READ FIRST: INTEGRATION_CONTRACT.md in the repo root — the canonical definition of what a Yggdrasil integration IS and the four canonical capability prefixes.
+
+ABSOLUTE rule #0 (Yggdrasil scope vs Backend scope):
+- Yggdrasil = IDP for the operating company's own internal resources (webhook URL config, infra buckets, repo provisioning, secret management — things the COMPANY owns).
+- Backend services = end-user-facing business operations (charge user, refund order, emit user's invoice — things the END-USER's transaction concerns).
+- If unsure: "if the company changes ownership / sells / shuts down, does the resource follow the company or the end-user?" Company → Yggdrasil. End-user → backend.
+- Example: provisioning the Stripe webhook URL on Stripe dashboard so backend can receive events = YGGDRASIL. Charging a user for product Y = BACKEND. Same provider, opposite sides of the line.
+
+Hard rules (excerpt from INTEGRATION_CONTRACT.md):
+- Resource ops MUST use ensure_<resource> / observe_<resource_type> / destroy_<resource> / discover_<resource_type>. NEVER create_*/list_*/delete_*/update_* for resource operations.
+- Lego principle: NEVER hardcode AWS, GCP, Vault, RabbitMQ, Postgres, or any specific cloud/secret-store/broker/DB. Use abstractions via credentials_ref URI scheme.
+- Integration is infrastructure reconciliation, NOT business logic. No business state, no inbound webhook business processing, no business decisions.
+- Every mutation is idempotent + adopts-if-exists.
+- NEVER log credentials, secrets, signing keys, refresh tokens.
+
+This repository is a standalone Yggdrasil integration worker.
+Keep adapter protocol types local.
+Do not depend on Yggdrasil monorepo internals.
+Keep describe/execute/tests/examples/README aligned in every capability change.
+Preserve graceful shutdown and readiness behavior.
+
+If a planned change leads to create_*/list_*/delete_*/update_* resource op naming → STOP, re-read contract §5 and §10.
+If a planned change hardcodes a specific cloud/secret-store/broker → STOP, re-read contract §2.
