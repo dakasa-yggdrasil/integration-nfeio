@@ -1,22 +1,43 @@
 # GEMINI
 
-## 🔐 READ FIRST: `INTEGRATION_CONTRACT.md`
+`integration-nfeio` — standalone Yggdrasil integration worker
+(`integration_type: nfeio`, namespace `global`, `domain: payments`). Wraps the
+**NFe.io v2 REST API** for Brazilian fiscal documents (NFSe service invoices,
+companies, webhook subscriptions) and runs an **HMAC-verified webhook listener**
+that republishes NFe.io status callbacks to `enterprise-payments.*`.
 
-Before any change in this repo or any adapter cloned from it, read [`INTEGRATION_CONTRACT.md`](./INTEGRATION_CONTRACT.md). It defines:
-- **§0 ABSOLUTE: Yggdrasil scope vs Backend scope** — Yggdrasil = IDP for COMPANY's internal resources (webhook URL config, infra buckets, repo provisioning). Backend = END-USER business (charge user, refund order). Heuristic: resource follows company on ownership change → Yggdrasil; follows end-user → backend.
-- What a Yggdrasil integration IS / IS NOT
-- The four canonical capability prefixes (`ensure_/observe_/destroy_/discover_`)
-- **Lego principle** (no cloud/secret-store/broker/DB hardcoding)
-- **§6.5 mandatory mutation event emission** (golden rule)
-- Forbidden anti-patterns
+Repo: `github.com/dakasa-yggdrasil/integration-nfeio`.
 
-If you find yourself naming a capability `create_*`, `list_*`, `delete_*`, `update_*` for a resource — STOP and re-read §5 + §10.
-If you hardcode AWS / Vault / RabbitMQ / Postgres — STOP and re-read §2.
-If you're designing a capability to handle end-user business (charge, refund, subscribe) — STOP and re-read §0. That's backend territory.
+## Read first
 
-Then read `AGENTS.md` for repo-specific rules.
+The real contract is whatever **`Describe()` returns** in
+`providers/nfeio/adapter/spec.go` — capabilities, resource types,
+credential/instance schemas, transport, version. Trust it over any doc. Then
+read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
 
-Focus areas:
-- Keep this repository transport/runtime focused.
-- Keep protocol types local.
-- Validate any capability change against README, tests, and examples.
+## Quick facts
+
+- **Version:** `AdapterVersion = "2.3.0"` (`spec.go`).
+- **Transport:** default `http_json`, RPC on `:8081` (`/rpc/describe` +
+  `/rpc/execute`); AMQP opt-in via `YGGDRASIL_TRANSPORT=amqp` + `BROKER_URL`
+  (queues `yggdrasil.adapter.nfeio.{describe,execute}`). Health `:8080`,
+  webhook `:8082`.
+- **Capabilities:** 14 callable `execute` ops + 1 reactor
+  (`nfse_webhook_received`, webhook-triggered, not an execute op). Canonical
+  `ensure_/observe_/destroy_` triples for service_invoice / company /
+  webhook_subscription, plus `observe_companies`, `observe_municipalities`, and
+  allowlisted helpers `retrieve_pdf`, `retrieve_xml`, `manage_template`,
+  `bulk_issue`, `calculate_iss`. Pre-v2.0.0 names kept as legacy aliases.
+- **Credentials (required):** `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET`.
+
+## Rules
+
+- Keep `Describe()` aligned with `Execute()`; `cmd/lint-action-catalog`
+  (`pkg/contractcheck`) gates it in CI.
+- Keep the worker standalone (no yggdrasil-core / monorepo imports; use
+  `yggdrasil-sdk-go` + local `family/contract`).
+- Add/rename a capability → update `spec.go`, `manifest/capability.*.yaml`,
+  tests, `docs/`, README together. Don't add `create_/list_/delete_/update_`
+  names; use the `ensure_/observe_/destroy_/discover_` convention.
+- `manifest/integration_type.nfeio.yaml` is a stale snapshot (says `2.0.0`);
+  `spec.go` is authoritative — don't change code to match the manifest.

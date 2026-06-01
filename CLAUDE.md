@@ -1,155 +1,203 @@
-# Claude Code Context: integration-template
+# Claude Code Context: integration-nfeio
 
-> ## 🔐 READ FIRST: `INTEGRATION_CONTRACT.md`
->
-> Before doing anything in this repo or in any `dakasa-yggdrasil/integration-*` adapter, read **[`INTEGRATION_CONTRACT.md`](./INTEGRATION_CONTRACT.md)**. That document is the canonical definition of what a Yggdrasil integration IS (and IS NOT), the four capability prefixes (`ensure_/observe_/destroy_/discover_`), the **Lego principle** (no cloud / secret-store / broker / DB coupling — Yggdrasil is provider-agnostic by design), and the forbidden anti-patterns. New adapters and new capabilities MUST conform — yggdrasil-core's schema validator enforces a subset at registration time.
->
-> If you find yourself naming a capability `create_*`, `list_*`, `delete_*`, `update_*` for a resource operation — STOP and re-read §5 + §10 (self-test checklist).
->
-> If you find yourself hardcoding "AWS" / "Vault" / "RabbitMQ" / "Postgres" in adapter code — STOP and re-read §2 (Lego principle).
+This is the **NFe.io adapter** — a standalone Yggdrasil integration worker
+(`integration_type: nfeio`, namespace `global`) that wraps the NFe.io v2 REST
+API to manage the lifecycle of Brazilian fiscal documents (NFSe service
+invoices), and runs an HMAC-verified webhook listener for inbound NFe.io status
+callbacks.
 
-Start with `AGENTS.md` for the rules-of-engagement summary. This file
-expands the context for Claude-style assistants.
+Repo: `github.com/dakasa-yggdrasil/integration-nfeio`.
 
-## What this repo is
+> **Trust `Describe()` in `providers/nfeio/adapter/spec.go` over this file.**
+> The adapter's live contract — capabilities, resource types, credential and
+> instance schemas, transport, version — is whatever `Describe()` returns at
+> runtime. This document is a map, not the source of truth. If anything below
+> disagrees with `spec.go`, `spec.go` wins; fix this file. CI cross-checks
+> `Describe()` against `SupportedExecuteOperations` via
+> `cmd/lint-action-catalog` (`pkg/contractcheck`), so the spec stays honest
+> about what `Execute()` actually handles.
 
-A **production-ready scaffold** for writing a new Yggdrasil integration
-adapter. Cloned by `yggdrasil new integration <name>` (the
-`internal/scaffoldcli/` path in the `dakasa-yggdrasil/yggdrasil` CLI),
-which rewrites the module path and integration name into the target
-repo. Out of the box: `go test ./...` passes, the worker boots against
-a local RabbitMQ, `/healthz` and `/readyz` are wired.
+## What this adapter does
 
-Repo: `github.com/dakasa-yggdrasil/integration-template` (open source,
-Apache 2.0). Public since 2026-05-26 (Path A: flipped to public via
-`update_repository_visibility` capability).
+Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
-## Stack
+- **Service invoices (NFSe):** issue, observe (read one or list), cancel,
+  retrieve signed PDF/XML download URLs, and bulk-issue up to 50 at a time.
+- **Companies:** ensure a company is registered at NFe.io, observe companies.
+- **Webhook subscriptions:** ensure / observe / destroy NFe.io webhook
+  subscriptions (the provider-side delivery config).
+- **Municipalities + templates:** list NFe.io-supported municipalities
+  (cached), and read/validate the in-memory município templates this repo
+  ships under `manifest/templates/` (per-município ISS rules used to
+  `calculate_iss`).
+- **Webhook reactor:** a dedicated HTTP listener receives NFe.io callbacks,
+  HMAC-verifies them, dedupes (LRU), normalizes the status, and republishes to
+  the `enterprise-payments.*` queues via the `publish_message` capability on the
+  rabbitmq-topology instance. This is **not** an `execute` op — it is fired by
+  the webhook server, not the RPC bus.
 
-- Go 1.25.
-- `rabbitmq/amqp091-go v1.10.0` — direct AMQP usage in `main.go`
-  (does NOT go through `yggdrasil-sdk-go` yet — the template
-  currently ships its own minimal RPC layer in `controllers/message/`
-  to keep adopters' import surface small).
-- `go.uber.org/zap` — structured logging.
+## Transport & version
+
+- **`AdapterVersion = "2.3.0"`** (in `spec.go`; also the default for the
+  link-time-overridable `main.Version`).
+- **Default transport is `http_json`** — RPC served on **port 8081**
+  (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
+- **AMQP is opt-in**: set `YGGDRASIL_TRANSPORT=amqp` (or `rabbitmq`) and provide
+  `BROKER_URL`; the SDK then serves describe/execute on the
+  `yggdrasil.adapter.nfeio.{describe,execute}` queues. `Describe()` reports
+  `rabbitmq` + queue names in that mode, `http_json` + endpoints otherwise.
+- Three listeners total (see `cmd/adapter/main.go`):
+  1. **RPC** (HTTP `:8081` or AMQP) — describe + execute, via `yggdrasil-sdk-go`.
+  2. **Health** (`:8080`, `HEALTHCHECK_PORT`) — `/healthz`, `/readyz`,
+     `/metrics`. Both probes return 200; reconnect is handled inside the
+     transport, so readiness is effectively "templates loaded, loop running".
+  3. **Webhook** (`:8082`, `WEBHOOK_PORT`) — inbound NFe.io callbacks at
+     `/webhook/nfeio`.
+
+## Capabilities (canonical names — see `spec.go`)
+
+14 callable `execute` ops + 1 reactor. The canonical names follow the v2.0.0
+capability convention (`ensure_/observe_/destroy_/discover_` prefixes for
+resource lifecycles, with documented helper/action exceptions).
+
+| Canonical capability | Resource | Notes |
+|---|---|---|
+| `ensure_service_invoice` | service_invoice | issue NFSe; 409 duplicate → idempotent success |
+| `observe_service_invoices` | service_invoice | filter by `{id}` (one) or paginate (list) |
+| `destroy_service_invoice` | service_invoice | cancel NFSe; 404 → already-absent success |
+| `retrieve_pdf` | service_invoice | allowlisted helper — signed PDF URL |
+| `retrieve_xml` | service_invoice | allowlisted helper — signed XML URL |
+| `ensure_company` | company | register at NFe.io; 409 → idempotent success |
+| `observe_companies` | company | filter by `{federal_tax_number}` or list |
+| `observe_municipalities` | municipality | cached 1h, stale-while-error |
+| `manage_template` | municipality_template | control-plane: get/list/validate templates |
+| `bulk_issue` | service_invoice | bulk action — up to 50, semaphore 5, partial-failure |
+| `calculate_iss` | municipality_template | pure-function helper — ISS from template |
+| `ensure_webhook_subscription` | webhook_subscription | POST /v2/webhooks; adopt-or-patch |
+| `observe_webhook_subscriptions` | webhook_subscription | filter by `{id}` or list |
+| `destroy_webhook_subscription` | webhook_subscription | DELETE; 404 → already-absent success |
+| `nfse_webhook_received` *(reactor)* | service_invoice | NOT an execute op — webhook-server-triggered |
+
+The four non-prefix names (`retrieve_pdf`, `retrieve_xml`, `manage_template`,
+`bulk_issue`, `calculate_iss`) are **kept by allowlist** — they are helpers,
+control-plane actions, or bulk/pure-function operations, not CRUD on an external
+resource. The rationale is documented inline in `actionCatalog()` in `spec.go`.
+
+### Legacy aliases
+
+Pre-v2.0.0 names are still accepted, so older callers and stored envelopes keep
+working. They route through `reconcile.WithLegacyNames(...)` (the reconcile
+dispatch in `reconcilers.go`) and the legacy fallback cases in `executeRoute`
+(`adapter.go`). Do **not** add new ones — they exist only for back-compat:
+
+- service_invoice: `issue_nfse`, `get_nfse_status`, `cancel_nfse`,
+  `list_service_invoices`
+- company: `register_company`, `update_company`
+- municipality: `list_municipalities`
+- webhook_subscription: `create_webhook_endpoint`, `delete_webhook_endpoint`,
+  `list_webhook_endpoints`
 
 ## Repo layout
 
 ```
-main.go                        # AMQP connect, signal handler, /healthz + /readyz
-controllers/message/           # AMQP RPC consumers (consume.go, describe.go, execute.go, rpc.go, register.go)
-internal/adapter/              # spec.go — `Describe()` contract + `Execute()` switch; lint.go enforces it
-internal/protocol/             # local RPC types (kept here, not imported from core, per AGENTS.md)
-pkg/contractcheck/             # PUBLIC lint pkg: catches describe-contract drift in adapter specs
-                               # — extracted (commit 95335d7) so integration-grafana and
-                               # integration-secrets-management can reuse the same check
-examples/                      # Sample run / wiring
-cmd/                           # (extension point)
-yggdrasil-quickstart.yaml      # Quickstart bundle so adopters can `yggdrasil install` this
-templates/                     # Reserved
+cmd/adapter/                  # main binary: 3 listeners (RPC/health/webhook); embeds templates/*.yaml
+cmd/adapter/templates/        # build-time copy of manifest/templates (Go embed can't escape '..')
+cmd/validate-templates/       # CI gate: fails on any município-template schema error
+cmd/lint-action-catalog/      # CI gate: Describe() vs SupportedExecuteOperations drift (contractcheck)
+providers/nfeio/adapter/      # the adapter — see "Where things live" below
+providers/nfeio/config/       # env loading (config.go): API key, webhook secret, ports, base URL
+family/contract/              # local contract types (AdapterDescribeResponse, schema specs, etc.)
+pkg/contractcheck/            # public lint pkg used by cmd/lint-action-catalog
+manifest/                     # integration_type + per-capability + instance + reactor YAML; templates/
+manifest/templates/           # per-município ISS template YAML (3106200, 3304557, 3550308, 4106902, 4205407)
+deploy/                       # deployment artifacts
+docs/                         # CAPABILITIES / CONFIGURATION / DEVELOPMENT / OPERATIONS / USAGE
+integration_tests/            # integration test harness
+yggdrasil-quickstart.yaml     # one-shot installer bundle (yggdrasil install …)
+Dockerfile                    # golang:1.25 → distroless; EXPOSE 8080 8081 8082
 ```
 
-## Mandatory adapter contract
+Key files in `providers/nfeio/adapter/`:
 
-Every Yggdrasil integration adapter MUST:
+- `spec.go` — `Describe()` contract, capability constants, `SupportedExecuteOperations`, action catalog, Prometheus metrics. **Source of truth.**
+- `adapter.go` — `DescribeHandler`, `ExecuteHandler`, `executeRoute` switch (canonical ops + legacy-alias fallbacks).
+- `reconcilers.go` — `WireReconcilersWithInstance`: installs the SDK reconcile dispatch (ensure/observe/destroy triples + legacy names + §6.5 mutation-event emission) ahead of the legacy execute switch.
+- `client.go` / `bearer.go` — NFe.io v2 HTTP client + auth.
+- `webhook_server.go` — inbound webhook listener: HMAC verify → LRU dedup → normalize → publish.
+- `publish_dispatch.go` — republishes normalized webhook events to `enterprise-payments.*`.
+- `issue_nfse.go` / `cancel_nfse.go` / `get_nfse_status.go` / `register_company.go` / `bulk_issue.go` / `retrieve_pdf.go` / `retrieve_xml.go` / `list_municipalities.go` / `manage_template.go` / `tax_calc.go` / `template_loader.go` / `webhook_subscription.go` — per-operation logic (filenames still use legacy NFSe verbs).
 
-1. Register under a **family** (the contract) and one or more
-   **providers** (implementations).
-2. Expose three mandatory operation categories: `describe`, `execute`,
-   `health`.
-3. Declare a credential schema + instance schema at the family or
-   type manifest level (lives in `internal/adapter/spec.go`).
-4. Keep `Describe()` in sync with what `Execute()` actually accepts.
-   The `pkg/contractcheck` linter enforces this in CI; do NOT silence
-   it.
-5. Ship a `yggdrasil-quickstart.yaml` so adopters can install with
-   `yggdrasil install dakasa-org/integration-your-thing`.
+## Credentials & instance config
 
-## Runtime expectations
+From `Describe()` / `config.go`:
 
-- Worker connects to RabbitMQ via `BROKER_URL` (no default — fatal if
-  unset).
-- `/healthz` is liveness only (always 200).
-- `/readyz` reflects RabbitMQ connection state (503 when closed).
-- Graceful shutdown on `SIGINT`/`SIGTERM`. The main loop also exits
-  when `conn.NotifyClose()` fires — kubelet then restarts the pod
-  (cleanest path; matches the pattern in `yggdrasil-core` commit
-  `9d30e34`).
-- Env knobs: `HEALTHCHECK_PORT` (default `8080`),
-  `HTTP_READ_HEADER_TIMEOUT_SECONDS`, `HTTP_READ_TIMEOUT_SECONDS`,
-  `HTTP_WRITE_TIMEOUT_SECONDS`, `HTTP_IDLE_TIMEOUT_SECONDS`.
+- **Credentials (required):** `NFEIO_API_KEY` (REST auth), `NFEIO_WEBHOOK_SECRET`
+  (HMAC verify of inbound webhooks). Both are secret/sensitive. `config.Load()`
+  fails fast (process exits) if either is empty.
+- **Instance schema:** `environment` enum `production` | `sandbox` (default
+  `production`).
+- **Other env knobs:** `NFEIO_COMPANY_ID` (optional default company; per-call
+  override allowed), `NFEIO_BASE_URL` (default `https://api.nfe.io`),
+  `RPC_PORT` (8081), `WEBHOOK_PORT` (8082), `HEALTHCHECK_PORT` (8080),
+  `TEMPLATES_DIR` (default `manifest/templates`; falls back to the binary's
+  embedded templates if absent), `YGGDRASIL_TRANSPORT`, `BROKER_URL`,
+  `YGGDRASIL_CORE_URL`, `RABBITMQ_TOPOLOGY_INSTANCE`, `YGGDRASIL_RUN_TOKEN`.
 
-## CI / image flow
+## Webhook security
 
-`.github/workflows/`:
+The webhook server (`webhook_server.go`) reads the raw body *before* JSON
+parsing so the HMAC covers the exact bytes NFe.io signed. It verifies
+`X-Hub-Signature-256` (falling back to `X-Hub-Signature`) against
+`NFEIO_WEBHOOK_SECRET` using `sdkwebhook.VerifyHMACSHA256Header`; a bad
+signature is `401`. After verify, it dedupes by event id (or a SHA-256 of the
+body when no id is present) through an LRU cache, then normalizes and publishes.
 
-- `ci.yml` — go test + lint + contractcheck.
-- `release.yml` — publishes the worker image to
-  `ghcr.io/dakasa-yggdrasil/integration-template`.
-- `publish-oci.yml` — publishes the `yggdrasil-quickstart.yaml` as an
-  OCI artifact on tag (commit `2f47f0e`). The `yggdrasil install`
-  CLI consumes that with the `oci://` ref support added in
-  `dakasa-yggdrasil/yggdrasil` commit `6da5dfe`.
-- `emit-deploy-event.yml` — POSTs the deploy event into yggdrasil-core
-  (same soft-skip pattern as everywhere else).
-- `deploy.yml` — placeholder; this repo is a template, not a service.
-- `incident-escalation.yml` + `postmortem.yml` — Heimdall-driven ops
-  automation.
+## Mandatory adapter rules
 
-Cross-org private action note: workflows that previously used
-`dakasa-yggdrasil/action-emit-workflow-run` should use **inline
-curl+jq** (see `~/.claude/projects/-Users-dakasa-projects/memory/reference_inline_curl_jq_cross_org_actions.md`).
-Now that this repo is public the cross-org constraint is relaxed, but
-the inline pattern stays the safer default.
+- **Keep `Describe()` aligned with `Execute()`.** `cmd/lint-action-catalog`
+  (`pkg/contractcheck`) is a CI gate — don't silence it. Every catalog entry has
+  a matching `manifest/capability.*.yaml`.
+- **Keep the worker standalone.** Don't import runtime/domain code from
+  yggdrasil-core or the monorepo. Use `yggdrasil-sdk-go` + the local
+  `family/contract` types only.
+- **Rename/add a capability → update `spec.go`, the matching
+  `manifest/capability.*.yaml`, tests, `docs/`, and the README in the same
+  change.** Adding a *new* capability with a `create_/list_/delete_/update_`
+  prefix is the wrong move — use the `ensure_/observe_/destroy_/discover_`
+  convention.
+- **Fail fast over silent degradation.** No swallowing errors; 404s map to
+  already-absent success deliberately, terminal failures (e.g. 422
+  `cancellation_window_closed`) stay failures.
 
-## Recent commits
+## Manifest may be stale vs `spec.go`
 
-```
-95335d7 ✨ contractcheck: extract describe-contract lint to public pkg   ← now consumed by integration-grafana + integration-secrets-management
-fe2b853 ✨ lint: catch describe contract drift in adapter spec
-2f47f0e ✨ Add publish-oci GHA workflow: publish quickstart as OCI artifact on tag
-1d32ccb ✨ Production-ready scaffold: yggdrasil-quickstart stub + release workflow
-1fa8558 ✨ Public-ready: Apache 2.0 LICENSE + adopter-facing README
-1aa2a97 Document scheduling failure guardian signals
-7854402 Add incident escalation workflows
-6f1648f Document Heimdall lightweight support contract
-f10535a Accept remediation workflow inputs
-6fc3310 Use official workflow run action
-ae62b20 Add dogfood deploy workflows
-d241b97 Wait for broker in standalone and monorepo runtime
-ee7b42e Split monorepo and standalone Compose setups
-71f6a5d Align repository naming with integration-*
-281503e Initialize repository with production pack and AI context
-```
+`manifest/integration_type.nfeio.yaml` is a static snapshot and currently lags
+`spec.go`. **`Describe()` is authoritative; do not "fix" the code to match the
+manifest.** Known divergences (do NOT edit the manifest as part of routine work
+— just be aware):
+
+- Manifest `spec.version` / `adapter.version` / `image_tag` say `2.0.0`;
+  `spec.go` `AdapterVersion` is `2.3.0`.
+- Manifest lists `register_company` (a legacy alias) as a `default_action` of
+  `company`; `spec.go` does not.
+- Manifest `municipality_template.canonical_prefix` is
+  `thirdparty.nfeio.template`; `spec.go` uses
+  `thirdparty.nfeio.municipality_template`.
+- Manifest `identity_template`s use `.{id}`; `spec.go` uses
+  `.{external_id}` / `.{federal_tax_number}` / `.{code}`.
+- Manifest credential property keys are lowercase and the `instance_schema` is
+  empty; `spec.go` uses upper-case env-var keys and declares the `environment`
+  enum.
 
 ## Validation
 
 ```bash
 go test ./...
-task config
-task build:image
-task up         # local stack via compose
-task down
+go run ./cmd/validate-templates manifest/templates   # template-schema gate
+go run ./cmd/lint-action-catalog                      # describe ↔ execute gate
+docker build --build-arg VERSION=$(git rev-parse --short HEAD) .
 ```
 
-## Mandatory rules (from AGENTS.md, restated)
-
-- **Keep the plugin standalone.** Do not import runtime/domain code
-  from `yggdrasil-core` or the `yggdrasil` monorepo. Protocol types
-  stay local to this repo.
-- **`describe` MUST stay aligned with `execute`.** `pkg/contractcheck`
-  catches drift; don't silence it.
-- **Rename/add capabilities → update tests, examples, and README in
-  the same change.**
-- **Fail fast over silent degradation.** No swallowing AMQP errors,
-  no silent NACK loops.
-- **Business authority stays in `yggdrasil-core`.** This worker owns
-  integration runtime behavior only.
-
-## Where things live
-
-- Adapter spec (`Describe`/`Execute`) → `internal/adapter/spec.go`
-- Contract-drift lint → `internal/adapter/lint.go` + `pkg/contractcheck/`
-- AMQP consume / publish plumbing → `controllers/message/`
-- Health server → `main.go`
-- Quickstart for `yggdrasil install` → `yggdrasil-quickstart.yaml`
+CI (`.github/workflows/`): `ci.yml` (test + lint gates), `release.yml`
+(publishes the worker image to `ghcr.io/dakasa-yggdrasil/integration-nfeio`),
+`emit-deploy-event.yml` (POSTs the deploy event into yggdrasil-core).

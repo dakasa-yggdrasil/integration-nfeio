@@ -1,37 +1,72 @@
 # AGENTS
 
-## 🔐 READ FIRST: `INTEGRATION_CONTRACT.md`
+## What this repo is
 
-Every AI assistant making changes in this repo or in ANY adapter cloned from this template MUST read [`INTEGRATION_CONTRACT.md`](./INTEGRATION_CONTRACT.md) first. It defines what a Yggdrasil integration IS (and IS NOT), the canonical capability prefixes (`ensure_/observe_/destroy_/discover_`), the **Lego principle** (provider-agnostic — no hardcoded AWS / Vault / RabbitMQ / Postgres), and the forbidden anti-patterns. New capabilities MUST conform; non-conformant names will be flagged by yggdrasil-core's schema validator at registration (warn-only Phase 1, hard-fail Phase 2).
+`integration-nfeio` — a standalone Yggdrasil integration worker
+(`integration_type: nfeio`, namespace `global`). It wraps the **NFe.io v2 REST
+API** to run the lifecycle of Brazilian fiscal documents (NFSe service
+invoices, companies, webhook subscriptions) and runs an **HMAC-verified webhook
+listener** that republishes NFe.io status callbacks to `enterprise-payments.*`.
 
-If a user request would lead to a `create_*` / `list_*` / `delete_*` capability for a resource operation, or to hardcoding a specific cloud/secret-store/broker — STOP and revisit the contract before writing code.
+`domain: payments`. Repo: `github.com/dakasa-yggdrasil/integration-nfeio`.
 
-## Repo role
-This repository is a standalone Yggdrasil integration worker. It exposes an honest adapter contract through `describe` and executes capabilities through `execute`.
+## Source of truth
+
+The adapter's real contract is whatever **`Describe()` returns** in
+`providers/nfeio/adapter/spec.go`. Read it before changing anything; it owns the
+capability list, resource types, credential/instance schemas, transport, and
+version (`AdapterVersion = "2.3.0"`). `CLAUDE.md` has the full map. If a doc
+disagrees with `spec.go`, `spec.go` wins.
+
+## Capabilities
+
+14 callable `execute` ops + 1 webhook reactor (`nfse_webhook_received`, NOT an
+execute op). Canonical names follow the `ensure_/observe_/destroy_/discover_`
+convention; `retrieve_pdf`, `retrieve_xml`, `manage_template`, `bulk_issue`,
+`calculate_iss` are allowlisted helpers/actions. Pre-v2.0.0 names (`issue_nfse`,
+`get_nfse_status`, `cancel_nfse`, `register_company`, `list_municipalities`, …)
+are accepted as legacy aliases via `reconcile.WithLegacyNames` + the fallback
+cases in `executeRoute`. Don't add new `create_/list_/delete_/update_` names.
 
 ## Non-negotiable rules
-- Keep the plugin standalone. Do not import runtime/domain code from the Yggdrasil monorepo.
-- Keep protocol types local to this repository.
-- `describe` must stay aligned with what `execute` actually accepts.
-- If you add or rename capabilities, update tests, examples, and README in the same change.
-- Prefer failing fast over silently degrading adapter behavior.
-- This worker owns integration runtime behavior only. Business authority stays in `yggdrasil-core`.
 
-## Runtime expectations
-- The worker connects to RabbitMQ through `BROKER_URL`.
-- `/healthz` is liveness only.
-- `/readyz` must reflect whether the worker is still connected to RabbitMQ.
-- Production changes should preserve graceful shutdown on `SIGINT`/`SIGTERM`.
+- Keep `Describe()` aligned with what `Execute()` accepts.
+  `cmd/lint-action-catalog` (`pkg/contractcheck`) gates this in CI — don't
+  silence it. Each catalog entry has a matching `manifest/capability.*.yaml`.
+- Keep the worker standalone: no imports of yggdrasil-core / monorepo runtime.
+  Use `yggdrasil-sdk-go` + the local `family/contract` types only.
+- Add/rename a capability → update `spec.go`, the matching
+  `manifest/capability.*.yaml`, tests, `docs/`, and the README in one change.
+- Fail fast over silent degradation. 404 → already-absent success is
+  deliberate; terminal errors (e.g. 422 `cancellation_window_closed`) stay
+  failures.
+- This worker owns integration runtime behavior only. Business authority stays
+  in yggdrasil-core.
+
+## Transport / runtime
+
+- Default transport `http_json` — RPC on `:8081` (`RPC_PORT`),
+  `/rpc/describe` + `/rpc/execute`. AMQP is opt-in via
+  `YGGDRASIL_TRANSPORT=amqp` + `BROKER_URL` (queues
+  `yggdrasil.adapter.nfeio.{describe,execute}`).
+- Health on `:8080` (`/healthz`, `/readyz`, `/metrics`); webhook on `:8082`
+  (`/webhook/nfeio`).
+- Required creds: `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET` (`config.Load()` exits
+  if either is empty).
+
+## Manifest may be stale
+
+`manifest/integration_type.nfeio.yaml` is a static snapshot that lags `spec.go`
+(version `2.0.0` vs `2.3.0`, stray `register_company` default action, differing
+canonical prefixes / identity templates, lowercase cred keys, empty
+instance_schema). `Describe()` is authoritative — do NOT change code to match
+the manifest, and don't edit the manifest as part of unrelated work.
 
 ## Commands
-- `go test ./...`
-- `task config`
-- `task build:image`
-- `task up`
-- `task down`
 
-## Change checklist
-- Update adapter tests before claiming a new capability works.
-- Keep examples under `examples/` aligned with the adapter contract.
-- Prefer explicit env vars and documented defaults.
-- Do not add Yggdrasil-core-specific data models here; use the public contract only.
+```bash
+go test ./...
+go run ./cmd/validate-templates manifest/templates
+go run ./cmd/lint-action-catalog
+docker build --build-arg VERSION=$(git rev-parse --short HEAD) .
+```
