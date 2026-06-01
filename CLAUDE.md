@@ -169,25 +169,16 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
   already-absent success deliberately, terminal failures (e.g. 422
   `cancellation_window_closed`) stay failures.
 
-## Manifest may be stale vs `spec.go`
+## Manifest ↔ `spec.go`
 
-`manifest/integration_type.nfeio.yaml` is a static snapshot and currently lags
-`spec.go`. **`Describe()` is authoritative; do not "fix" the code to match the
-manifest.** Known divergences (do NOT edit the manifest as part of routine work
-— just be aware):
-
-- Manifest `spec.version` / `adapter.version` / `image_tag` say `2.0.0`;
-  `spec.go` `AdapterVersion` is `2.3.0`.
-- Manifest lists `register_company` (a legacy alias) as a `default_action` of
-  `company`; `spec.go` does not.
-- Manifest `municipality_template.canonical_prefix` is
-  `thirdparty.nfeio.template`; `spec.go` uses
-  `thirdparty.nfeio.municipality_template`.
-- Manifest `identity_template`s use `.{id}`; `spec.go` uses
-  `.{external_id}` / `.{federal_tax_number}` / `.{code}`.
-- Manifest credential property keys are lowercase and the `instance_schema` is
-  empty; `spec.go` uses upper-case env-var keys and declares the `environment`
-  enum.
+`manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
+is currently **in sync** with `spec.go` (version `2.3.0`, no `register_company`
+default action, `thirdparty.nfeio.municipality_template` prefix,
+`.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, upper-case
+credential keys, `environment` enum). **`Describe()` is authoritative; do not
+"fix" the code to match the manifest** — re-derive the manifest from `Describe()`
+instead. No describe-dump tool exists here, so when the contract changes,
+hand-sync the snapshot in the same change and run the lint/spec gates.
 
 ## Validation
 
