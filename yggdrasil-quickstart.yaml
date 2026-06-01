@@ -1,0 +1,241 @@
+apiVersion: yggdrasil.io/v1alpha1
+kind: integration_quickstart
+metadata:
+  name: nfeio
+  namespace: global
+  description: |
+    One-shot installer for the nfeio provider. Single-adapter integration
+    that issues Brazilian municipal service invoices (NFSe) and product
+    invoices through the NFe.io REST API, and receives NFe.io status
+    callbacks on an HMAC-verified webhook listener.
+
+    Adopters install via:
+
+      yggdrasil install dakasa-yggdrasil/integration-nfeio
+spec:
+  display_name: NFe.io
+  description: |
+    nfeio provider — fiscal-document lifecycle via the NFe.io API
+    (domain: payments). Ensures companies and webhook subscriptions,
+    issues/observes/cancels service invoices (NFSe), bulk-issues up to
+    50 NFSe, retrieves signed PDF/XML URLs, computes ISS, and lists
+    supported municipalities. A dedicated webhook server HMAC-verifies
+    inbound NFe.io callbacks, dedupes, normalizes status, and republishes
+    to the enterprise-payments.* queues.
+    Auth via an NFe.io API key (REST) plus a webhook HMAC secret.
+  providers:
+    - id: runtime
+      display_name: NFe.io runtime adapter
+      description: |
+        HTTP client that calls the NFe.io v2 REST API, plus an inbound
+        webhook listener on /webhook/nfeio (port 8082). Idempotent
+        reconcile semantics (409 already_registered / duplicate decoded
+        into existing-resource success) keep reconcile loops from
+        oscillating. RPC is served over AMQP so yggdrasil-core reaches
+        the adapter through the shared broker.
+      requires:
+        - kind: integration_family
+          name: kubernetes
+          reason: We deploy the adapter pod via kubernetes/apply_manifest.
+        - kind: cluster_capability
+          capability: kubernetes
+          reason: The adapter runs as a Deployment.
+      inputs:
+        - id: instance_name
+          label: integration_instance name
+          type: string
+          required: true
+          default: nfeio-prod
+          validate:
+            regex: ^[a-z][a-z0-9-]*$
+        - id: namespace
+          label: instance namespace (Yggdrasil)
+          type: string
+          default: global
+        - id: cluster_namespace
+          label: kubernetes namespace
+          type: string
+          default: yggdrasil-adapters
+        - id: image
+          label: adapter image
+          type: string
+          default: ghcr.io/dakasa-yggdrasil/integration-nfeio:latest
+        - id: nfeio_api_key
+          label: NFe.io API key
+          description: |
+            API key generated in NFe.io → Settings → API. Authenticates all
+            REST calls. Maps to credential NFEIO_API_KEY.
+          type: string
+          required: true
+          sensitive: true
+        - id: nfeio_webhook_secret
+          label: Webhook HMAC secret
+          description: |
+            HMAC secret configured on the NFe.io webhook. Used to verify
+            inbound callbacks (X-Hub-Signature-256). Maps to credential
+            NFEIO_WEBHOOK_SECRET.
+          type: string
+          required: true
+          sensitive: true
+        - id: environment
+          label: NFe.io environment
+          description: Target NFe.io environment. Use sandbox for staging/homologação.
+          type: select
+          default: production
+          choices:
+            - value: production
+              label: Production
+            - value: sandbox
+              label: Sandbox (homologação)
+        - id: base_url
+          label: NFe.io API base URL
+          description: |
+            REST base URL. Defaults to the production endpoint; override
+            only for a non-default NFe.io environment.
+          type: string
+          default: https://api.nfe.io
+      steps:
+        - id: apply-credentials-secret
+          description: |
+            Store the NFe.io API key + webhook HMAC secret in a Kubernetes
+            Secret so the adapter consumes them as env vars without leaking
+            them through the integration_instance config.
+          uses:
+            kind: integration
+            family: kubernetes
+            operation: apply_manifest
+          with:
+            manifest:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: integration-nfeio-credentials
+                namespace: "{{ inputs.cluster_namespace }}"
+              type: Opaque
+              stringData:
+                NFEIO_API_KEY: "{{ inputs.nfeio_api_key }}"
+                NFEIO_WEBHOOK_SECRET: "{{ inputs.nfeio_webhook_secret }}"
+        - id: apply-service-account
+          description: ServiceAccount used by the adapter pod.
+          uses:
+            kind: integration
+            family: kubernetes
+            operation: apply_manifest
+          with:
+            manifest:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: integration-nfeio
+                namespace: "{{ inputs.cluster_namespace }}"
+        - id: apply-adapter-deployment
+          description: |
+            Deploy the nfeio adapter. Three listeners boot: AMQP RPC
+            (describe + execute over BROKER_URL), the health/metrics server
+            (port 8080), and the inbound webhook server (port 8082,
+            /webhook/nfeio). NFEIO_API_KEY + NFEIO_WEBHOOK_SECRET are
+            mandatory — the process exits at boot if either is empty.
+          uses:
+            kind: integration
+            family: kubernetes
+            operation: apply_manifest
+          with:
+            manifest:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: integration-nfeio-adapter
+                namespace: "{{ inputs.cluster_namespace }}"
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: integration-nfeio-adapter
+                template:
+                  metadata:
+                    labels:
+                      app: integration-nfeio-adapter
+                  spec:
+                    serviceAccountName: integration-nfeio
+                    containers:
+                      - name: adapter
+                        image: "{{ inputs.image }}"
+                        ports:
+                          - name: health
+                            containerPort: 8080
+                          - name: webhook
+                            containerPort: 8082
+                        env:
+                          - name: YGGDRASIL_TRANSPORT
+                            value: amqp
+                          - name: BROKER_URL
+                            valueFrom:
+                              secretKeyRef:
+                                name: yggdrasil-broker
+                                key: url
+                          - name: NFEIO_API_KEY
+                            valueFrom:
+                              secretKeyRef:
+                                name: integration-nfeio-credentials
+                                key: NFEIO_API_KEY
+                          - name: NFEIO_WEBHOOK_SECRET
+                            valueFrom:
+                              secretKeyRef:
+                                name: integration-nfeio-credentials
+                                key: NFEIO_WEBHOOK_SECRET
+                          - name: NFEIO_BASE_URL
+                            value: "{{ inputs.base_url }}"
+                          - name: WEBHOOK_PORT
+                            value: "8082"
+                          - name: HEALTHCHECK_PORT
+                            value: "8080"
+                        readinessProbe:
+                          httpGet:
+                            path: /readyz
+                            port: 8080
+                        livenessProbe:
+                          httpGet:
+                            path: /healthz
+                            port: 8080
+        - id: register-instance
+          description: |
+            Register the integration_instance pointing at the nfeio type.
+            Credentials (NFEIO_API_KEY + NFEIO_WEBHOOK_SECRET) are passed via
+            credentials_ref so the values never land in the manifest; the
+            instance config carries the runtime environment selector.
+          uses:
+            kind: yggdrasil
+            operation: apply_manifest
+          with:
+            manifest:
+              apiVersion: yggdrasil.io/v1alpha1
+              kind: integration_instance
+              metadata:
+                name: "{{ inputs.instance_name }}"
+                namespace: "{{ inputs.namespace }}"
+              spec:
+                type_ref:
+                  namespace: global
+                  name: nfeio
+                credentials_ref: integration-nfeio-credentials
+                config:
+                  environment: "{{ inputs.environment }}"
+      smoke_test:
+        description: |
+          List NFe.io-supported municipalities via observe_municipalities.
+          The call takes no required input (state_code/page/page_size all
+          default) and is read-only, so it exercises BOTH adapter wiring
+          (AMQP RPC resolution) and NFe.io API auth in one shot.
+        uses:
+          kind: integration
+          family: payments
+          operation: observe_municipalities
+        with:
+          input: {}
+        timeout_seconds: 30
+      post_install_hints:
+        - "The webhook listener serves /webhook/nfeio on port 8082 — this URL MUST be reachable from NFe.io (route it through the cluster ingress) before NFe.io status callbacks can be delivered."
+        - "Register the callback at NFe.io: family=payments, operation=ensure_webhook_subscription, with the public ingress URL of /webhook/nfeio and the desired events."
+        - "Issue an NFSe: family=payments, operation=ensure_service_invoice (idempotent on external_id)."
+        - "Bulk-issue up to 50 NFSe at once: family=payments, operation=bulk_issue."
+        - "Use environment=sandbox at install time for NFe.io homologação before going to production."
