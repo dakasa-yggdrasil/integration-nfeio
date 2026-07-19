@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   emit:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && vars.YGGDRASIL_DEPLOY_EMIT_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: POST deploy event to yggdrasil-core
@@ -25,10 +25,6 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           REPO: ${{ github.repository }}
         run: |
-          if [ -z "$YGGDRASIL_DEPLOY_TOKEN" ]; then
-            echo "YGGDRASIL_DEPLOY_TOKEN absent; soft-skip (matches template pattern)"
-            exit 0
-          fi
           PAYLOAD=$(jq -nc \
             --arg repo "$REPO" \
             --arg sha "$HEAD_SHA" \
