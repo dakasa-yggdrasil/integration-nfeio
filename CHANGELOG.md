@@ -1,5 +1,33 @@
 # Changelog
 
+## v3.0.0 - 2026-09-05
+
+### Security
+
+- Replaced create-shaped webhook reconciliation with exact-ID observation and
+  update. `ensure_webhook_subscription` now requires an existing provider `id`
+  plus `insecure_ssl=false`, performs GET then optional PUT on
+  `/v2/webhooks/{id}`, and never POSTs, lists, or adopts by URI or filters.
+- The only permitted webhook mutation is provider field `insecureSsl=true` to
+  `false`. The PUT body starts from the complete observed `webHook` object and
+  preserves documented, secret-bearing, and unknown future fields unchanged.
+  A second exact-ID GET confirms the secure setting after the PUT.
+- Webhook resource, adoption, and mutation-event outputs are reduced to safe
+  metadata. Provider `secret`, URI, headers, properties, raw bodies, and echoed
+  error content are excluded from responses, events, errors, and logs.
+- `destroy_webhook_subscription` now requires `confirm_id` to exactly equal the
+  target `id`. It is no longer a webhook default action, and the generic SDK
+  destroy path refuses to call NFe.io without the full confirmation payload.
+
+### Breaking
+
+- `ensure_webhook_subscription` input changed from URL/events creation intent to
+  exact `id` plus `insecure_ssl=false` reconciliation intent.
+- `observe_webhook_subscriptions` requires exact `id`; enumeration and cursor
+  input are no longer supported.
+- The v2 compatibility aliases were removed as scheduled by the integration
+  contract's one-minor-cycle rule.
+
 ## Unreleased — 2026-05-27
 
 ### Changed

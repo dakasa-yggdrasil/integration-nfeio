@@ -15,7 +15,7 @@ listener** that republishes NFe.io status callbacks to `enterprise-payments.*`.
 The adapter's real contract is whatever **`Describe()` returns** in
 `providers/nfeio/adapter/spec.go`. Read it before changing anything; it owns the
 capability list, resource types, credential/instance schemas, transport, and
-version (`AdapterVersion = "2.3.0"`). `CLAUDE.md` has the full map. If a doc
+version (`AdapterVersion = "3.0.0"`). `CLAUDE.md` has the full map. If a doc
 disagrees with `spec.go`, `spec.go` wins.
 
 ## Capabilities
@@ -24,9 +24,8 @@ disagrees with `spec.go`, `spec.go` wins.
 execute op). Canonical names follow the `ensure_/observe_/destroy_/discover_`
 convention; `retrieve_pdf`, `retrieve_xml`, `manage_template`, `bulk_issue`,
 `calculate_iss` are allowlisted helpers/actions. Pre-v2.0.0 names (`issue_nfse`,
-`get_nfse_status`, `cancel_nfse`, `register_company`, `list_municipalities`, …)
-are accepted as legacy aliases via `reconcile.WithLegacyNames` + the fallback
-cases in `executeRoute`. Don't add new `create_/list_/delete_/update_` names.
+`get_nfse_status`, `cancel_nfse`, `register_company`, `list_municipalities`, etc.)
+were removed at v3.0.0. Don't add new `create_/list_/delete_/update_` names.
 
 ## Non-negotiable rules
 
@@ -54,13 +53,12 @@ cases in `executeRoute`. Don't add new `create_/list_/delete_/update_` names.
 - Required creds: `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET` (`config.Load()` exits
   if either is empty).
 
-## Manifest may be stale
+## Manifest synchronization
 
-`manifest/integration_type.nfeio.yaml` is a static snapshot that lags `spec.go`
-(version `2.0.0` vs `2.3.0`, stray `register_company` default action, differing
-canonical prefixes / identity templates, lowercase cred keys, empty
-instance_schema). `Describe()` is authoritative — do NOT change code to match
-the manifest, and don't edit the manifest as part of unrelated work.
+`manifest/integration_type.nfeio.yaml` is a static snapshot derived from
+`Describe()`. `Describe()` is authoritative. Do not change code to match a stale
+manifest; re-derive the manifest when the live contract changes, and do not edit
+it as part of unrelated work.
 
 ## Commands
 

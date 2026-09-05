@@ -12,15 +12,15 @@ spec:
   dashboard:
     url: https://app.nfe.io
     label: "Abrir NFE.io"
-  version: 2.3.0
+  version: 3.0.0
   adapter:
     image_repo: ghcr.io/dakasa-yggdrasil/integration-nfeio
-    image_tag: v2.3.0
+    image_tag: v3.0.0
     transport: http_json
     endpoints:
       describe: /rpc/describe
       execute: /rpc/execute
-    version: 2.3.0
+    version: 3.0.0
     timeout_seconds: 60
   credential_schema:
     mode: inline
@@ -147,7 +147,6 @@ spec:
     default_actions:
     - ensure_webhook_subscription
     - observe_webhook_subscriptions
-    - destroy_webhook_subscription
     canonical_prefix: thirdparty.nfeio.webhook_subscription
     identity_template: webhook_subscription.{id}
   discovery:

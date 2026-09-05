@@ -10,8 +10,8 @@ There are **14 callable capabilities** (`execute`) across five resource types, p
 server and is **not** callable via `execute`. All capabilities are `idempotent: true`.
 
 Legacy aliases (`issue_nfse`, `get_nfse_status`, `cancel_nfse`, `register_company`,
-`list_municipalities`) are still routed to their canonical handlers for one minor
-cycle and removed in v3.0.0.
+`list_municipalities`, and the old webhook create/list/delete names) were removed
+at the v3.0.0 major boundary.
 
 ```mermaid
 flowchart LR
@@ -176,22 +176,33 @@ Canonical prefix `thirdparty.nfeio.webhook_subscription` · identity
 `webhook_subscription.{id}`. **New in v2.0.0.**
 
 ### `ensure_webhook_subscription`
-Ensure a webhook subscription exists for the given URL + events. `POST /v2/webhooks`;
-adopts an existing subscription with the same URL+events, PATCHes deltas otherwise.
-409/422 → idempotent success via adoption.
+Reconcile one webhook that already exists at NFe.io. The adapter performs an exact
+`GET /v2/webhooks/{id}`. If and only if the provider object has
+`insecureSsl=true`, it sends an exact-ID `PUT` with that field changed to `false`,
+preserves every other field, then confirms the result with another exact-ID GET.
+It never POSTs, lists, matches by URI, or adopts by mutable attributes.
 
-- **Required input:** `url`, `events` (array of strings). **Optional:** `company_id`.
+- **Required input:** `id`, `insecure_ssl` (must be `false`).
+- **Output:** `id`, `insecure_ssl`, `adopted`, and `updated` only.
+- **Secret boundary:** provider `secret`, `uri`, `headers`, `properties`, raw
+  payload, and future unknown fields are never returned in resources, adoption
+  responses, events, errors, or logs.
 
 ### `observe_webhook_subscriptions`
-Read subscriptions. With `{id}` returns a single-entry result
-(`GET /v2/webhooks/{id}`); otherwise paginates `GET /v2/webhooks`.
-
-- **Input (all optional):** `id`, `cursor`.
-
-### `destroy_webhook_subscription`
-Delete a subscription. `DELETE /v2/webhooks/{id}`. 404 → already-absent success.
+Read one webhook with an exact-ID `GET /v2/webhooks/{id}`. Empty filters, cursors,
+listing, discovery, and attribute-based adoption are deliberately rejected.
 
 - **Required input:** `id`.
+- **Output:** one minimal item with `id` and `insecure_ssl`; no provider secrets or
+  raw configuration.
+
+### `destroy_webhook_subscription`
+Delete one exact webhook only when the caller supplies the same provider ID twice.
+`DELETE /v2/webhooks/{id}` treats 404 as already-absent success. This capability is
+not in `webhook_subscription.default_actions`, so a normal reconcile cannot select
+it implicitly.
+
+- **Required input:** `id`, `confirm_id` (must exactly equal `id`).
 
 ---
 

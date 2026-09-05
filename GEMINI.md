@@ -17,7 +17,7 @@ read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
 
 ## Quick facts
 
-- **Version:** `AdapterVersion = "2.3.0"` (`spec.go`).
+- **Version:** `AdapterVersion = "3.0.0"` (`spec.go`).
 - **Transport:** default `http_json`, RPC on `:8081` (`/rpc/describe` +
   `/rpc/execute`); AMQP opt-in via `YGGDRASIL_TRANSPORT=amqp` + `BROKER_URL`
   (queues `yggdrasil.adapter.nfeio.{describe,execute}`). Health `:8080`,
@@ -27,7 +27,7 @@ read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
   `ensure_/observe_/destroy_` triples for service_invoice / company /
   webhook_subscription, plus `observe_companies`, `observe_municipalities`, and
   allowlisted helpers `retrieve_pdf`, `retrieve_xml`, `manage_template`,
-  `bulk_issue`, `calculate_iss`. Pre-v2.0.0 names kept as legacy aliases.
+  `bulk_issue`, `calculate_iss`. Pre-v2.0.0 aliases were removed at v3.0.0.
 - **Credentials (required):** `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET`.
 
 ## Rules

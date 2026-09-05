@@ -74,7 +74,7 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "2.3.0"
+	AdapterVersion  = "3.0.0"
 
 	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
 	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
@@ -89,7 +89,7 @@ const (
 	OpBulkIssue              = "bulk_issue"               // kept (bulk action — documented special case)
 	OpCalculateISS           = "calculate_iss"            // kept (allowlist — pure function helper)
 
-	// NEW v2.0.0: webhook_subscription resource lifecycle.
+	// webhook_subscription resource lifecycle.
 	OpEnsureWebhookSubscription   = "ensure_webhook_subscription"
 	OpObserveWebhookSubscriptions = "observe_webhook_subscriptions"
 	OpDestroyWebhookSubscription  = "destroy_webhook_subscription"
@@ -258,7 +258,7 @@ func Describe() contract.AdapterDescribeResponse {
 				IdentityTemplate: "webhook_subscription.{id}",
 				Discoverable:     false,
 				DefaultActions: []string{
-					OpEnsureWebhookSubscription, OpObserveWebhookSubscriptions, OpDestroyWebhookSubscription,
+					OpEnsureWebhookSubscription, OpObserveWebhookSubscriptions,
 				},
 			},
 		},
@@ -308,10 +308,11 @@ func actionCatalog() []contract.IntegrationActionDefinition {
 		{Name: OpManageTemplate, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Read-only manage_template: get, list, validate operations on in-memory município templates (control-plane action, kept by allowlist)."},
 		{Name: OpBulkIssue, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Bulk-issue up to 50 NFSe with semaphore 5 and partial-failure semantics (documented bulk-action special case, kept by allowlist)."},
 		{Name: OpCalculateISS, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Pure-function helper: compute ISS tax amount from municipality template and service amount (allowlisted)."},
-		// webhook_subscription canonical triple (NEW in v2.0.0).
-		{Name: OpEnsureWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Ensure a webhook subscription exists at NFe.io for the given URL+events. POSTs /v2/webhooks; adopts existing if same URL+events; PATCHes deltas otherwise."},
-		{Name: OpObserveWebhookSubscriptions, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Read webhook subscriptions at NFe.io. Filter by {id} or paginate list (GET /v2/webhooks)."},
-		{Name: OpDestroyWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Destroy a webhook subscription. DELETE /v2/webhooks/{id}. 404 → already-absent success."},
+		// webhook_subscription exact-ID lifecycle. Provider secrets and raw
+		// configuration never enter observed resources or mutation events.
+		{Name: OpEnsureWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Reconcile a pre-existing NFe.io webhook by exact ID. GET then PUT /v2/webhooks/{id}; only insecureSsl=true to false is mutable, and every other provider field is preserved."},
+		{Name: OpObserveWebhookSubscriptions, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Read one pre-existing webhook by exact ID (GET /v2/webhooks/{id}); enumeration and attribute-based adoption are disabled."},
+		{Name: OpDestroyWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Explicitly destroy one webhook by exact ID only when confirm_id equals id. DELETE /v2/webhooks/{id}; 404 is already-absent success."},
 		// Reactor (NOT exposed via execute; triggered by inbound webhook HTTP server).
 		{Name: ReactorWebhookReceived, Category: "reactor", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Reactor: receives NFe.io webhook, HMAC-verifies, dedupes, normalizes status, publishes to enterprise-payments.* queues via publish_message capability."},
 	}

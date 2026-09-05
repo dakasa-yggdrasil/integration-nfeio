@@ -83,15 +83,14 @@ schemas in [docs/CAPABILITIES.md](./docs/CAPABILITIES.md).
 | `observe_municipalities` | `municipality` | List NFe.io municipalities (cached 1h) |
 | `manage_template` | `municipality_template` | Read-only `get` / `list` / `validate` on bundled templates |
 | `calculate_iss` | `municipality_template` | Pure-function ISS tax computation (no network) |
-| `ensure_webhook_subscription` | `webhook_subscription` | Ensure an NFe.io webhook subscription |
-| `observe_webhook_subscriptions` | `webhook_subscription` | Read one (`{id}`) or paginate |
-| `destroy_webhook_subscription` | `webhook_subscription` | Delete a subscription; 404 → success |
+| `ensure_webhook_subscription` | `webhook_subscription` | Exact-ID GET/PUT; may only set `insecureSsl=false` |
+| `observe_webhook_subscriptions` | `webhook_subscription` | Read one exact `{id}`; no enumeration |
+| `destroy_webhook_subscription` | `webhook_subscription` | Exact-ID delete with matching `confirm_id`; 404 is success |
 | `nfse_webhook_received` *(reactor)* | `service_invoice` | Inbound NFe.io webhook → normalize → publish to `enterprise-payments.nfe.*` |
 
 > Capability names follow the Yggdrasil `ensure_/observe_/destroy_` convention.
-> Pre-v2.0.0 names (`issue_nfse`, `get_nfse_status`, `cancel_nfse`,
-> `register_company`, `list_municipalities`) are still accepted as legacy aliases
-> via the SDK shim, removed in v3.0.0. See [CHANGELOG.md](./CHANGELOG.md).
+> The pre-v2.0.0 compatibility aliases were removed at the v3.0.0 major boundary.
+> See [CHANGELOG.md](./CHANGELOG.md).
 
 ## Quick start
 
@@ -211,7 +210,7 @@ Repo layout, the describe/execute contract, and `pkg/contractcheck` are covered 
 
 - Go **1.25**.
 - `yggdrasil-sdk-go` **v0.8.3** (`adapter`, `webhookhttp`, `sdk/reconcile`, `sdk/events`).
-- Adapter version reported by `Describe()`: **2.3.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
+- Adapter version reported by `Describe()`: **3.0.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
 - Transport: HTTP-JSON (default) or AMQP, selected by `YGGDRASIL_TRANSPORT`.
 
 ## License

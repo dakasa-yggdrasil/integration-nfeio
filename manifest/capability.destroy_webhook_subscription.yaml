@@ -9,10 +9,12 @@ spec:
   idempotent: true
   resource_types: [webhook_subscription]
   description: >
-    Destroy a webhook subscription at NFe.io. DELETE
-    /v2/webhooks/{id}. 404 → already-absent success per convention §5.
+    Deliberately destroy one webhook by exact ID only when confirm_id
+    exactly equals id. DELETE /v2/webhooks/{id}; 404 is already-absent
+    success. This action is excluded from webhook default_actions.
   input_schema:
     type: object
-    required: [id]
+    required: [id, confirm_id]
     properties:
       id: {type: string}
+      confirm_id: {type: string}

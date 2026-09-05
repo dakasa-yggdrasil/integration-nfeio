@@ -16,9 +16,9 @@ spec:
   display_name: NFe.io
   description: |
     nfeio provider — fiscal-document lifecycle via the NFe.io API
-    (domain: payments). Ensures companies and webhook subscriptions,
-    issues/observes/cancels service invoices (NFSe), bulk-issues up to
-    50 NFSe, retrieves signed PDF/XML URLs, computes ISS, and lists
+    (domain: payments). Ensures companies and reconciles known webhook
+    subscriptions, issues/observes/cancels service invoices (NFSe),
+    bulk-issues up to 50 NFSe, retrieves signed PDF/XML URLs, computes ISS, and lists
     supported municipalities. A dedicated webhook server HMAC-verifies
     inbound NFe.io callbacks, dedupes, normalizes status, and republishes
     to the enterprise-payments.* queues.
@@ -28,11 +28,11 @@ spec:
       display_name: NFe.io runtime adapter
       description: |
         HTTP client that calls the NFe.io v2 REST API, plus an inbound
-        webhook listener on /webhook/nfeio (port 8082). Idempotent
-        reconcile semantics (409 already_registered / duplicate decoded
-        into existing-resource success) keep reconcile loops from
-        oscillating. RPC is served over AMQP so yggdrasil-core reaches
-        the adapter through the shared broker.
+        webhook listener on /webhook/nfeio (port 8082). Company creation
+        adopts 409 already_registered responses. Webhooks are never created
+        or discovered: an exact provider ID is required, and only the secure
+        TLS flag may be reconciled to false. RPC is served over AMQP so
+        yggdrasil-core reaches the adapter through the shared broker.
       requires:
         - kind: integration_family
           name: kubernetes
@@ -235,7 +235,7 @@ spec:
         timeout_seconds: 30
       post_install_hints:
         - "The webhook listener serves /webhook/nfeio on port 8082 — this URL MUST be reachable from NFe.io (route it through the cluster ingress) before NFe.io status callbacks can be delivered."
-        - "Register the callback at NFe.io: family=payments, operation=ensure_webhook_subscription, with the public ingress URL of /webhook/nfeio and the desired events."
+        - "Create the callback manually in NFe.io, record its exact provider ID, then use ensure_webhook_subscription with that ID and insecure_ssl=false only after the public TLS ingress cutover. The adapter never creates or discovers webhooks."
         - "Issue an NFSe: family=payments, operation=ensure_service_invoice (idempotent on external_id)."
         - "Bulk-issue up to 50 NFSe at once: family=payments, operation=bulk_issue."
         - "Use environment=sandbox at install time for NFe.io homologação before going to production."

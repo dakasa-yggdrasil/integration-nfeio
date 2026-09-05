@@ -32,8 +32,8 @@ func DescribeHandler(logger *zap.Logger) sdkadapter.Handler {
 // first — activating §6.5 mutation event auto-emission via the
 // WireReconcilersWithInstance-installed dispatch table. Operations
 // not registered with a Reconciler (retrieve_pdf, retrieve_xml,
-// manage_template, bulk_issue, calculate_iss, observe_municipalities,
-// legacy aliases) fall back to executeRoute. The reactor
+// manage_template, bulk_issue, calculate_iss, observe_municipalities)
+// fall back to executeRoute. The reactor
 // (nfse_webhook_received) is intentionally NOT routed here — it is
 // triggered exclusively by the webhook HTTP server.
 func ExecuteHandler(
@@ -51,9 +51,9 @@ func ExecuteHandler(
 		if !isUnsupportedReconcileOp(dispatchErr) {
 			return nil, "", dispatchErr
 		}
-		// Operation not registered through RegisterReconciler — fall
-		// back to the legacy executeRoute (action helpers, legacy
-		// aliases, observe_municipalities cache flow).
+		// Operation not registered through RegisterReconciler: fall
+		// back to executeRoute for action helpers and the
+		// observe_municipalities cache flow.
 		body, err := executeRoute(ctx, cli, templates, deps, d.Body)
 		if err != nil {
 			return nil, "", err
@@ -63,7 +63,7 @@ func ExecuteHandler(
 }
 
 // isUnsupportedReconcileOp matches the SDK's "unsupported operation"
-// signal so the bridge falls back to the legacy switch instead of
+// signal so the bridge falls back to the allowlisted action switch instead of
 // surfacing the error to callers.
 func isUnsupportedReconcileOp(err error) bool {
 	if err == nil {
@@ -94,11 +94,8 @@ func executeRoute(
 	// Tag ctx with the capability name so client.do() picks it up for
 	// duration/error metric labels.
 	ctx = WithOp(ctx, env.Operation)
-	// v2.0.0 canonical names; legacy names (issue_nfse, get_nfse_status,
-	// cancel_nfse, register_company, list_municipalities) are accepted via
-	// the SDK reconcile.WithLegacyNames compat shim wired in main.go. The
-	// shim normalizes to canonical names before delivery, so this switch
-	// only sees the canonical set.
+	// Canonical names only. The v2 compatibility aliases were removed at
+	// the v3 major boundary.
 	switch env.Operation {
 	case OpEnsureServiceInvoice:
 		var in IssueNFSeInput
@@ -227,62 +224,6 @@ func executeRoute(
 			return nil, err
 		}
 		out, err := DestroyWebhookSubscription(ctx, cli, in)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(out)
-	// Legacy compat — accept pre-v2.0.0 names on the direct RPC path so
-	// callers that haven't migrated yet still work even without the SDK
-	// reconcile shim. Phase 2 (v3.0.0) removes these.
-	case "issue_nfse":
-		var in IssueNFSeInput
-		if err := json.Unmarshal(env.Input, &in); err != nil {
-			return nil, err
-		}
-		out, err := IssueNFSe(ctx, cli, templates, in)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(out)
-	case "get_nfse_status":
-		var in GetNFSeStatusInput
-		if err := json.Unmarshal(env.Input, &in); err != nil {
-			return nil, err
-		}
-		out, err := GetNFSeStatus(ctx, cli, in)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(out)
-	case "cancel_nfse":
-		var in CancelNFSeInput
-		if err := json.Unmarshal(env.Input, &in); err != nil {
-			return nil, err
-		}
-		out, err := CancelNFSe(ctx, cli, in)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(out)
-	case "register_company":
-		var in RegisterCompanyInput
-		if err := json.Unmarshal(env.Input, &in); err != nil {
-			return nil, err
-		}
-		out, err := EnsureCompany(ctx, cli, in)
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(out)
-	case "list_municipalities":
-		var in ListMunicipalitiesInput
-		if err := json.Unmarshal(env.Input, &in); err != nil {
-			return nil, err
-		}
-		if deps == nil || deps.MunicipalitiesCache == nil {
-			return nil, fmt.Errorf("list_municipalities: cache not wired")
-		}
-		out, err := ListMunicipalities(ctx, cli, deps.MunicipalitiesCache, in)
 		if err != nil {
 			return nil, err
 		}
@@ -475,8 +416,7 @@ func ObserveServiceInvoices(ctx context.Context, cli *Client, raw []byte) (*Obse
 }
 
 // GetNFSeStatusInput selects an invoice by ID, optionally overriding the
-// company at call time. Kept for internal reuse by ObserveServiceInvoices
-// and the legacy compat case in executeRoute.
+// company at call time. Kept for internal reuse by ObserveServiceInvoices.
 type GetNFSeStatusInput struct {
 	CompanyID string `json:"company_id,omitempty"`
 	InvoiceID string `json:"invoice_id"`
@@ -756,166 +696,6 @@ func ObserveCompanies(ctx context.Context, cli *Client, raw []byte) (*ObserveCom
 	for _, it := range rawResp.Items {
 		out.Items = append(out.Items, RegisterCompanyOutput{
 			ID: it.ID, FederalTaxNumber: it.FederalTaxNumber, Name: it.Name, Status: it.Status,
-		})
-	}
-	return out, nil
-}
-
-// EnsureWebhookSubscriptionInput declares the desired webhook subscription.
-// NFe.io binds a subscription to URL + a list of event types (e.g.
-// "Issued", "Cancelled"). Multiple subscriptions per URL are allowed
-// upstream; ensure_* collapses them via adoption (returns the first
-// subscription matching URL+events instead of creating a duplicate).
-type EnsureWebhookSubscriptionInput struct {
-	URL       string   `json:"url"`
-	Events    []string `json:"events"`
-	CompanyID string   `json:"company_id,omitempty"`
-}
-
-// EnsureWebhookSubscriptionOutput is the observed envelope after ensure.
-// Adopted is true when the subscription existed and was not re-created.
-type EnsureWebhookSubscriptionOutput struct {
-	ID        string   `json:"id"`
-	URL       string   `json:"url"`
-	Events    []string `json:"events"`
-	Active    bool     `json:"active"`
-	CompanyID string   `json:"company_id,omitempty"`
-	Adopted   bool     `json:"adopted,omitempty"`
-}
-
-// EnsureWebhookSubscription POSTs /v2/webhooks. NFe.io returns 409 (or 422
-// duplicate) when a subscription with the same URL+events already exists;
-// we adopt by decoding the existing envelope.
-//
-// The convention's GET-then-POST contract is satisfied via this 409-aware
-// path: even though NFe.io does not expose a filter-by-URL query, the
-// duplicate response carries the existing subscription ID so adoption is
-// race-free and idempotent.
-func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhookSubscriptionInput) (*EnsureWebhookSubscriptionOutput, error) {
-	body := map[string]any{
-		"url":    in.URL,
-		"events": in.Events,
-	}
-	if in.CompanyID != "" {
-		body["companyId"] = in.CompanyID
-	}
-	var raw struct {
-		ID        string   `json:"id"`
-		URL       string   `json:"url"`
-		Events    []string `json:"events"`
-		Active    bool     `json:"active"`
-		CompanyID string   `json:"companyId"`
-	}
-	err := cli.do(ctx, http.MethodPost, "/v2/webhooks", body, &raw)
-	if err == nil {
-		return &EnsureWebhookSubscriptionOutput{
-			ID: raw.ID, URL: raw.URL, Events: raw.Events,
-			Active: raw.Active, CompanyID: raw.CompanyID,
-		}, nil
-	}
-	apiErr := &NfeIoAPIError{}
-	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusConflict || apiErr.Status == http.StatusUnprocessableEntity) {
-		_ = json.Unmarshal(apiErr.RawBody, &raw)
-		return &EnsureWebhookSubscriptionOutput{
-			ID: raw.ID, URL: raw.URL, Events: raw.Events,
-			Active: raw.Active, CompanyID: raw.CompanyID, Adopted: true,
-		}, nil
-	}
-	return nil, err
-}
-
-// DestroyWebhookSubscriptionInput selects the subscription by ID.
-type DestroyWebhookSubscriptionInput struct {
-	ID string `json:"id"`
-}
-
-// DestroyWebhookSubscriptionOutput carries the destruction outcome. Deleted
-// is true when NFe.io confirmed removal (200/204); AlreadyAbsent is true
-// when a 404 was treated as success per convention §5.
-type DestroyWebhookSubscriptionOutput struct {
-	Deleted       bool `json:"deleted"`
-	AlreadyAbsent bool `json:"already_absent,omitempty"`
-}
-
-// DestroyWebhookSubscription DELETEs /v2/webhooks/{id}. 404 → already-absent
-// success per convention §5 ("Destroy MUST treat a not-found response as
-// success").
-func DestroyWebhookSubscription(ctx context.Context, cli *Client, in DestroyWebhookSubscriptionInput) (*DestroyWebhookSubscriptionOutput, error) {
-	if in.ID == "" {
-		return nil, errors.New("destroy_webhook_subscription: id required")
-	}
-	path := fmt.Sprintf("/v2/webhooks/%s", in.ID)
-	err := cli.do(ctx, http.MethodDelete, path, nil, nil)
-	if err == nil {
-		return &DestroyWebhookSubscriptionOutput{Deleted: true}, nil
-	}
-	apiErr := &NfeIoAPIError{}
-	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
-		return &DestroyWebhookSubscriptionOutput{Deleted: true, AlreadyAbsent: true}, nil
-	}
-	return nil, err
-}
-
-// ObserveWebhookSubscriptionsInput is the filter envelope.
-type ObserveWebhookSubscriptionsInput struct {
-	ID     string `json:"id,omitempty"`
-	Cursor string `json:"cursor,omitempty"`
-}
-
-// ObserveWebhookSubscriptionsOutput mirrors the SDK's observe_* shape.
-type ObserveWebhookSubscriptionsOutput struct {
-	Items  []EnsureWebhookSubscriptionOutput `json:"items"`
-	Cursor string                            `json:"cursor,omitempty"`
-}
-
-// ObserveWebhookSubscriptions lists or filters webhook subscriptions.
-// Filter {id} → single GET /v2/webhooks/{id}; otherwise GET /v2/webhooks.
-func ObserveWebhookSubscriptions(ctx context.Context, cli *Client, raw []byte) (*ObserveWebhookSubscriptionsOutput, error) {
-	in := ObserveWebhookSubscriptionsInput{}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &in); err != nil {
-			return nil, fmt.Errorf("observe_webhook_subscriptions: parse filter: %w", err)
-		}
-	}
-	if in.ID != "" {
-		var raw struct {
-			ID        string   `json:"id"`
-			URL       string   `json:"url"`
-			Events    []string `json:"events"`
-			Active    bool     `json:"active"`
-			CompanyID string   `json:"companyId"`
-		}
-		path := fmt.Sprintf("/v2/webhooks/%s", in.ID)
-		if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
-			return nil, err
-		}
-		return &ObserveWebhookSubscriptionsOutput{Items: []EnsureWebhookSubscriptionOutput{{
-			ID: raw.ID, URL: raw.URL, Events: raw.Events,
-			Active: raw.Active, CompanyID: raw.CompanyID,
-		}}}, nil
-	}
-	path := "/v2/webhooks"
-	if in.Cursor != "" {
-		path += "?cursor=" + in.Cursor
-	}
-	var rawResp struct {
-		Items []struct {
-			ID        string   `json:"id"`
-			URL       string   `json:"url"`
-			Events    []string `json:"events"`
-			Active    bool     `json:"active"`
-			CompanyID string   `json:"companyId"`
-		} `json:"items"`
-		Cursor string `json:"cursor"`
-	}
-	if err := cli.do(ctx, http.MethodGet, path, nil, &rawResp); err != nil {
-		return nil, err
-	}
-	out := &ObserveWebhookSubscriptionsOutput{Cursor: rawResp.Cursor}
-	for _, it := range rawResp.Items {
-		out.Items = append(out.Items, EnsureWebhookSubscriptionOutput{
-			ID: it.ID, URL: it.URL, Events: it.Events,
-			Active: it.Active, CompanyID: it.CompanyID,
 		})
 	}
 	return out, nil

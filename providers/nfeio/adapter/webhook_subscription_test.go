@@ -4,98 +4,360 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
+	"strings"
+	"sync/atomic"
 	"testing"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/config"
 )
 
-// TestEnsureWebhookSubscription_Create exercises the happy path POST →
-// 201 → adapter returns the freshly-created subscription envelope.
-func TestEnsureWebhookSubscription_Create(t *testing.T) {
-	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v2/webhooks" {
-			t.Errorf("got %s %s; want POST /v2/webhooks", r.Method, r.URL.Path)
+const (
+	webhookSecretCanary = "CANARY_WEBHOOK_SECRET_DO_NOT_LEAK"
+	headerSecretCanary  = "CANARY_AUTHORIZATION_DO_NOT_LEAK"
+	propertyCanary      = "CANARY_PROPERTY_DO_NOT_LEAK"
+)
+
+func falsePointer() *bool {
+	value := false
+	return &value
+}
+
+func truePointer() *bool {
+	value := true
+	return &value
+}
+
+func webhookProviderObject(id string, insecureSSL bool) map[string]any {
+	return map[string]any{
+		"id":          id,
+		"uri":         "https://enterprise.dakasa.me/webhook/nfeio?token=" + propertyCanary,
+		"secret":      webhookSecretCanary,
+		"contentType": "application/json",
+		"insecureSsl": insecureSSL,
+		"status":      "active",
+		"version":     "2",
+		"filters":     []any{"InvoiceIssued", "InvoiceCancelled"},
+		"headers": map[string]any{
+			"Authorization": headerSecretCanary,
+			"X-Preserved":   "yes",
+		},
+		"properties": map[string]any{
+			"opaque": propertyCanary,
+		},
+		"subscription": map[string]any{
+			"companyId": "company-1",
+		},
+		"createdOn":  "2026-01-02T03:04:05Z",
+		"modifiedOn": "2026-01-02T03:04:05Z",
+		"futureField": map[string]any{
+			"keep": true,
+		},
+	}
+}
+
+func writeWebhookResponse(t *testing.T, w http.ResponseWriter, object map[string]any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]any{webhookEnvelopeField: object}); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func assertSecretFree(t *testing.T, value string) {
+	t.Helper()
+	for _, forbidden := range []string{
+		webhookSecretCanary,
+		headerSecretCanary,
+		propertyCanary,
+		`"secret"`,
+		`"headers"`,
+		`"properties"`,
+		`"uri"`,
+		"Authorization",
+	} {
+		if strings.Contains(value, forbidden) {
+			t.Fatalf("secret-bearing provider data escaped the boundary: found %q in %s", forbidden, value)
 		}
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"wh-1","url":"https://example.com/x","events":["Issued","Cancelled"],"active":true,"companyId":"cmpDefault"}`))
-	})
-	defer srv.Close()
-	cli := mustNewClient(t, srv.URL)
-
-	out, err := EnsureWebhookSubscription(context.Background(), cli, EnsureWebhookSubscriptionInput{
-		URL:    "https://example.com/x",
-		Events: []string{"Issued", "Cancelled"},
-	})
-	if err != nil {
-		t.Fatalf("EnsureWebhookSubscription err = %v", err)
-	}
-	if out.ID != "wh-1" || out.Adopted {
-		t.Fatalf("expected fresh subscription wh-1 (adopted=false); got %+v", out)
 	}
 }
 
-// TestEnsureWebhookSubscription_Adopt exercises the 409 duplicate → adopt
-// path (ensure_* convention: existing resource is decoded from error body).
-func TestEnsureWebhookSubscription_Adopt(t *testing.T) {
+func TestEnsureWebhookSubscription_ExactIDNoopNeverMutates(t *testing.T) {
+	var calls int32
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"id":"wh-existing","url":"https://example.com/x","events":["Issued"],"active":true,"companyId":"cmpDefault"}`))
-	})
-	defer srv.Close()
-	cli := mustNewClient(t, srv.URL)
-
-	out, err := EnsureWebhookSubscription(context.Background(), cli, EnsureWebhookSubscriptionInput{
-		URL:    "https://example.com/x",
-		Events: []string{"Issued"},
-	})
-	if err != nil {
-		t.Fatalf("EnsureWebhookSubscription err = %v", err)
-	}
-	if out.ID != "wh-existing" || !out.Adopted {
-		t.Fatalf("expected adopted wh-existing; got %+v", out)
-	}
-}
-
-// TestDestroyWebhookSubscription_404IsSuccess locks the convention §5
-// invariant: Destroy MUST treat a not-found response as success.
-func TestDestroyWebhookSubscription_404IsSuccess(t *testing.T) {
-	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/v2/webhooks/wh-1" {
-			t.Errorf("got %s %s; want DELETE /v2/webhooks/wh-1", r.Method, r.URL.Path)
-		}
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":"not_found"}`))
-	})
-	defer srv.Close()
-	cli := mustNewClient(t, srv.URL)
-
-	out, err := DestroyWebhookSubscription(context.Background(), cli, DestroyWebhookSubscriptionInput{ID: "wh-1"})
-	if err != nil {
-		t.Fatalf("DestroyWebhookSubscription on 404 must succeed; err = %v", err)
-	}
-	if !out.Deleted || !out.AlreadyAbsent {
-		t.Fatalf("expected Deleted=true AlreadyAbsent=true; got %+v", out)
-	}
-}
-
-// TestObserveWebhookSubscriptions_ByID locks the single-resource filter
-// path. The convention's observe_* with {id} acts as the canonical GET
-// /resource/{id} replacement.
-func TestObserveWebhookSubscriptions_ByID(t *testing.T) {
-	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
 		if r.Method != http.MethodGet || r.URL.Path != "/v2/webhooks/wh-1" {
-			t.Errorf("got %s %s; want GET /v2/webhooks/wh-1", r.Method, r.URL.Path)
+			t.Errorf("got %s %s; want exact GET", r.Method, r.URL.Path)
 		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"id":"wh-1","url":"https://x","events":["Issued"],"active":true,"companyId":"cmpDefault"}`))
+		writeWebhookResponse(t, w, webhookProviderObject("wh-1", false))
 	})
 	defer srv.Close()
-	cli := mustNewClient(t, srv.URL)
 
-	raw, _ := json.Marshal(ObserveWebhookSubscriptionsInput{ID: "wh-1"})
-	out, err := ObserveWebhookSubscriptions(context.Background(), cli, raw)
+	out, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+		ID:          "wh-1",
+		InsecureSSL: falsePointer(),
+	})
+	if err != nil {
+		t.Fatalf("EnsureWebhookSubscription err = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d; want one exact GET", calls)
+	}
+	if out.ID != "wh-1" || out.InsecureSSL || !out.Adopted || out.Updated {
+		t.Fatalf("unexpected safe output: %+v", out)
+	}
+	encoded, _ := json.Marshal(out)
+	assertSecretFree(t, string(encoded))
+}
+
+func TestEnsureWebhookSubscription_ExactIDUpdatePreservesEveryExistingField(t *testing.T) {
+	original := webhookProviderObject("wh-1", true)
+	secure := webhookProviderObject("wh-1", false)
+	var calls int32
+
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		if r.URL.Path != "/v2/webhooks/wh-1" {
+			t.Fatalf("call %d path = %s; want exact ID path", call, r.URL.Path)
+		}
+		switch call {
+		case 1:
+			if r.Method != http.MethodGet {
+				t.Fatalf("call 1 method = %s; want GET", r.Method)
+			}
+			writeWebhookResponse(t, w, original)
+		case 2:
+			if r.Method != http.MethodPut {
+				t.Fatalf("call 2 method = %s; want PUT", r.Method)
+			}
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode PUT body: %v", err)
+			}
+			got := body[webhookEnvelopeField]
+			if !reflect.DeepEqual(got, secure) {
+				gotJSON, _ := json.Marshal(got)
+				wantJSON, _ := json.Marshal(secure)
+				t.Fatalf("PUT changed fields besides insecureSsl\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case 3:
+			if r.Method != http.MethodGet {
+				t.Fatalf("call 3 method = %s; want confirmation GET", r.Method)
+			}
+			writeWebhookResponse(t, w, secure)
+		default:
+			t.Fatalf("unexpected provider call %d: %s %s", call, r.Method, r.URL.Path)
+		}
+	})
+	defer srv.Close()
+
+	out, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+		ID:          "wh-1",
+		InsecureSSL: falsePointer(),
+	})
+	if err != nil {
+		t.Fatalf("EnsureWebhookSubscription err = %v", err)
+	}
+	if calls != 3 {
+		t.Fatalf("provider calls = %d; want GET, PUT, GET", calls)
+	}
+	if !out.Adopted || !out.Updated || out.InsecureSSL {
+		t.Fatalf("unexpected safe output: %+v", out)
+	}
+	encoded, _ := json.Marshal(out)
+	assertSecretFree(t, string(encoded))
+}
+
+func TestEnsureWebhookSubscription_RejectsCreateShapeBeforeProviderCall(t *testing.T) {
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		t.Fatalf("provider must not be called for a create-shaped request")
+	})
+	defer srv.Close()
+
+	payload := []byte(`{"operation":"ensure_webhook_subscription","input":{"id":"wh-1","insecure_ssl":false,"url":"https://example.invalid/` + propertyCanary + `","events":["Issued"]}}`)
+	_, err := executeRoute(context.Background(), mustNewClient(t, srv.URL), nil, nil, payload)
+	if err == nil {
+		t.Fatal("create-shaped request must fail")
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls = %d; want zero", calls)
+	}
+	assertSecretFree(t, err.Error())
+}
+
+func TestEnsureWebhookSubscription_RejectsUnsafeDesiredStateBeforeProviderCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		input EnsureWebhookSubscriptionInput
+	}{
+		{name: "missing exact id", input: EnsureWebhookSubscriptionInput{InsecureSSL: falsePointer()}},
+		{name: "missing desired field", input: EnsureWebhookSubscriptionInput{ID: "wh-1"}},
+		{name: "allows only false", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: truePointer()}},
+		{name: "path injection", input: EnsureWebhookSubscriptionInput{ID: "../webhooks", InsecureSSL: falsePointer()}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls int32
+			srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&calls, 1)
+			})
+			defer srv.Close()
+			_, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), tt.input)
+			if err == nil {
+				t.Fatal("unsafe desired state must fail")
+			}
+			if calls != 0 {
+				t.Fatalf("provider calls = %d; want zero", calls)
+			}
+		})
+	}
+}
+
+func TestEnsureWebhookSubscription_RejectsMismatchedProviderIDWithoutPUT(t *testing.T) {
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		if r.Method != http.MethodGet {
+			t.Fatalf("mismatched identity must never be mutated, got %s", r.Method)
+		}
+		writeWebhookResponse(t, w, webhookProviderObject("wh-other", true))
+	})
+	defer srv.Close()
+
+	_, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+		ID:          "wh-1",
+		InsecureSSL: falsePointer(),
+	})
+	if err == nil {
+		t.Fatal("mismatched provider ID must fail")
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d; want one GET and no PUT", calls)
+	}
+}
+
+func TestEnsureWebhookSubscription_SanitizesProviderErrorAndLogs(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	logger := zap.New(core)
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		if call == 1 {
+			writeWebhookResponse(t, w, webhookProviderObject("wh-1", true))
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"name":"` + headerSecretCanary + `","message":"` + webhookSecretCanary + propertyCanary + `"}`))
+	})
+	defer srv.Close()
+	cli, err := NewClient(&config.Config{
+		APIKey:        "key123",
+		WebhookSecret: "ws",
+		CompanyID:     "cmpDefault",
+		BaseURL:       srv.URL,
+	}, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = EnsureWebhookSubscription(context.Background(), cli, EnsureWebhookSubscriptionInput{
+		ID:          "wh-1",
+		InsecureSSL: falsePointer(),
+	})
+	if err == nil {
+		t.Fatal("provider PUT failure must remain a failure")
+	}
+	assertSecretFree(t, err.Error())
+	for _, entry := range logs.All() {
+		encoded, _ := json.Marshal(entry.ContextMap())
+		assertSecretFree(t, entry.Message+string(encoded))
+	}
+}
+
+func TestObserveWebhookSubscriptions_ExactIDAndSecretFree(t *testing.T) {
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		if r.Method != http.MethodGet || r.URL.Path != "/v2/webhooks/wh-1" {
+			t.Fatalf("got %s %s; want exact GET", r.Method, r.URL.Path)
+		}
+		writeWebhookResponse(t, w, webhookProviderObject("wh-1", true))
+	})
+	defer srv.Close()
+
+	out, err := ObserveWebhookSubscriptions(context.Background(), mustNewClient(t, srv.URL), []byte(`{"id":"wh-1"}`))
 	if err != nil {
 		t.Fatalf("ObserveWebhookSubscriptions err = %v", err)
 	}
-	if len(out.Items) != 1 || out.Items[0].ID != "wh-1" {
-		t.Fatalf("expected single item wh-1; got %+v", out)
+	if calls != 1 || len(out.Items) != 1 || out.Items[0].ID != "wh-1" || !out.Items[0].InsecureSSL {
+		t.Fatalf("unexpected observe output: calls=%d out=%+v", calls, out)
+	}
+	encoded, _ := json.Marshal(out)
+	assertSecretFree(t, string(encoded))
+}
+
+func TestObserveWebhookSubscriptions_NeverLists(t *testing.T) {
+	for _, raw := range [][]byte{nil, []byte(`{}`), []byte(`{"cursor":"next"}`)} {
+		var calls int32
+		srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+		})
+		_, err := ObserveWebhookSubscriptions(context.Background(), mustNewClient(t, srv.URL), raw)
+		srv.Close()
+		if err == nil {
+			t.Fatalf("input %s must fail without an exact ID", raw)
+		}
+		if calls != 0 {
+			t.Fatalf("input %s made %d provider calls; want zero", raw, calls)
+		}
+	}
+}
+
+func TestDestroyWebhookSubscription_RequiresMatchingConfirmation(t *testing.T) {
+	for _, input := range []DestroyWebhookSubscriptionInput{
+		{ID: "wh-1"},
+		{ID: "wh-1", ConfirmID: "wh-other"},
+		{ID: "../wh-1", ConfirmID: "../wh-1"},
+	} {
+		var calls int32
+		srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+		})
+		_, err := DestroyWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), input)
+		srv.Close()
+		if err == nil {
+			t.Fatalf("unsafe destroy input %+v must fail", input)
+		}
+		if calls != 0 {
+			t.Fatalf("unsafe destroy made %d calls; want zero", calls)
+		}
+	}
+}
+
+func TestDestroyWebhookSubscription_ConfirmedExactID404IsSuccess(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/v2/webhooks/wh-1" {
+			t.Fatalf("got %s %s; want exact DELETE", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"` + webhookSecretCanary + `"}`))
+	})
+	defer srv.Close()
+
+	out, err := DestroyWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), DestroyWebhookSubscriptionInput{
+		ID:        "wh-1",
+		ConfirmID: "wh-1",
+	})
+	if err != nil {
+		t.Fatalf("confirmed 404 destroy must succeed: %v", err)
+	}
+	if !out.Deleted || !out.AlreadyAbsent {
+		t.Fatalf("unexpected destroy output: %+v", out)
 	}
 }

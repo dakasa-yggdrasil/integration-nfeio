@@ -88,18 +88,17 @@ func main() {
 		Concurrency:     5,
 	})
 
-	// v2.2.0 production wiring: install the SDK reconcile dispatch
-	// table BEFORE the legacy "execute" Register call. ExecuteHandler
+	// Install the SDK reconcile dispatch table before the "execute" handler.
+	// ExecuteHandler
 	// routes inbound envelopes through reconcile.Dispatch first
 	// (activating §6.5 mutation event auto-emission via the
 	// WireReconcilersWithInstance-installed dispatch path), and falls
 	// back to executeRoute for ops outside the
 	// ensure_/observe_/destroy_ triples — retrieve_pdf, retrieve_xml,
-	// manage_template, bulk_issue, calculate_iss, observe_municipalities
-	// (cache-backed, not a Reconciler), and the pre-v2.0.0 legacy
-	// aliases. instanceID is left empty here; emitted MutationEvents
-	// carry an empty InstanceID and the receiver falls back to the
-	// envelope-scoped label.
+	// manage_template, bulk_issue, calculate_iss and observe_municipalities
+	// (cache-backed, not a Reconciler). instanceID is left empty here;
+	// emitted MutationEvents carry an empty InstanceID and the receiver
+	// falls back to the envelope-scoped label.
 	ad.WireReconcilersWithInstance(a, cli, templates, "")
 
 	a.Register("describe", ad.DescribeHandler(logger)).

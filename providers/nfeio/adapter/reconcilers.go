@@ -11,21 +11,19 @@ import (
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/reconcile"
 )
 
-// This file wires the SDK v0.5.0 reconcile.RegisterReconciler dispatch for
-// the three managed resource types in integration-nfeio v2.0.0:
+// This file wires the SDK reconcile.RegisterReconciler dispatch for the three
+// managed resource types in integration-nfeio v3:
 //
-//   - service_invoice    → ensure/observe/destroy + WithLegacyNames(issue_nfse, get_nfse_status, cancel_nfse, list_service_invoices)
-//   - company            → ensure/observe/destroy + WithLegacyNames(register_company, update_company)
-//   - webhook_subscription → ensure/observe/destroy + WithLegacyNames(create_webhook_endpoint, delete_webhook_endpoint, list_webhook_endpoints)
+//   - service_invoice: ensure/observe/destroy
+//   - company: ensure/observe/destroy
+//   - webhook_subscription: exact-ID ensure/observe plus guarded destroy
 //
-// The hand-written switch in executeRoute remains the primary dispatch path
-// (it carries the legacy compat cases for direct RPC callers). This
-// reconciler wiring is the recommended path for new callers — it produces
-// the same JSON envelopes and respects the same idempotency contracts.
+// The hand-written switch in executeRoute remains the dispatch path for
+// allowlisted actions that are not resource reconcilers.
 //
 // Conformance with INTEGRATION_CONTRACT.md §5:
-//   - Ensure: GET-then-PUT internally (or POST-with-409-adopt semantics).
-//   - Observe: filter={id} routes to single-resource lookup, else paginated list.
+//   - Ensure: GET-then-PUT internally.
+//   - Observe: filter={id} routes to a single-resource lookup.
 //   - Destroy: 404 → success.
 
 // serviceInvoiceReconciler bridges the existing hand-written handlers to the
@@ -107,7 +105,9 @@ func (r *companyReconciler) Destroy(ctx context.Context, ref string) error {
 	return fmt.Errorf("destroy_company: not supported by NFe.io v2 API")
 }
 
-// webhookSubReconciler wraps the new webhook_subscription resource.
+// webhookSubReconciler wraps exact-ID webhook reconciliation. The generic
+// Destroy method is deliberately non-mutating; SDK callers must pass the full
+// desired payload with an exact confirm_id through DestroyWithDesired.
 type webhookSubDesired = EnsureWebhookSubscriptionInput
 type webhookSubObserved = EnsureWebhookSubscriptionOutput
 
@@ -133,24 +133,30 @@ func (r *webhookSubReconciler) Observe(ctx context.Context, filter map[string]an
 	if err != nil {
 		return nil, "", err
 	}
-	return out.Items, out.Cursor, nil
+	return out.Items, "", nil
 }
 
 func (r *webhookSubReconciler) Destroy(ctx context.Context, ref string) error {
-	_, err := DestroyWebhookSubscription(ctx, r.cli, DestroyWebhookSubscriptionInput{ID: ref})
+	return fmt.Errorf("destroy_webhook_subscription: explicit confirm_id is required")
+}
+
+func (r *webhookSubReconciler) DestroyWithDesired(ctx context.Context, ref string, desired webhookSubDesired) error {
+	if desired.Ref != "" && desired.Ref != ref {
+		return fmt.Errorf("destroy_webhook_subscription: ref mismatch")
+	}
+	if desired.ID != "" && desired.ID != ref {
+		return fmt.Errorf("destroy_webhook_subscription: id mismatch")
+	}
+	_, err := DestroyWebhookSubscription(ctx, r.cli, DestroyWebhookSubscriptionInput{
+		ID:        ref,
+		ConfirmID: desired.ConfirmID,
+	})
 	return err
 }
 
-// WireReconcilers installs the v2.0.0 capability triples into the SDK
-// reconcile dispatch table. Call once at startup, alongside the legacy
-// Register("execute", ExecuteHandler(...)) chain — both dispatch paths
-// produce equivalent JSON envelopes; the reconcile path is the recommended
-// destination once callers migrate to canonical names.
-//
-// The WithLegacyNames entries here mirror Tier C from the rollout spec
-// (docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
-// They are removed at SDK v0.6.0; adapters dropping the shim should also
-// remove the legacy cases in executeRoute.
+// WireReconcilers installs the canonical capability triples into the SDK
+// reconcile dispatch table. The one-minor v2 compatibility aliases are gone
+// at the v3 major boundary.
 func WireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate) {
 	WireReconcilersWithInstance(a, cli, templates, "")
 }
@@ -173,23 +179,17 @@ func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates m
 	reconcile.RegisterReconciler[serviceInvoiceDesired, serviceInvoiceObserved](
 		a, "service_invoice", "service_invoices",
 		newServiceInvoiceReconciler(cli, templates),
-		append(commonOpts,
-			reconcile.WithLegacyNames("issue_nfse", "get_nfse_status", "cancel_nfse", "list_service_invoices"),
-		)...,
+		commonOpts...,
 	)
 	reconcile.RegisterReconciler[companyDesired, companyObserved](
 		a, "company", "companies",
 		newCompanyReconciler(cli),
-		append(commonOpts,
-			reconcile.WithLegacyNames("register_company", "update_company"),
-		)...,
+		commonOpts...,
 	)
 	reconcile.RegisterReconciler[webhookSubDesired, webhookSubObserved](
 		a, "webhook_subscription", "webhook_subscriptions",
 		newWebhookSubReconciler(cli),
-		append(commonOpts,
-			reconcile.WithLegacyNames("create_webhook_endpoint", "delete_webhook_endpoint", "list_webhook_endpoints"),
-		)...,
+		commonOpts...,
 	)
 }
 

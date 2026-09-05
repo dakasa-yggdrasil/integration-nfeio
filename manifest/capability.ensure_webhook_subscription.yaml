@@ -9,14 +9,15 @@ spec:
   idempotent: true
   resource_types: [webhook_subscription]
   description: >
-    Ensure a webhook subscription exists at NFe.io for the given URL +
-    events list (v2.0.0 NEW resource). POSTs /v2/webhooks; 409/422
-    duplicate decoded into existing envelope (idempotent success
-    path via adoption).
+    Reconcile one pre-existing NFe.io webhook by exact ID. GET then PUT
+    /v2/webhooks/{id}; only insecureSsl=true to false is mutable. The
+    adapter never creates, lists, or adopts by mutable attributes and
+    preserves every other provider field.
   input_schema:
     type: object
-    required: [url, events]
+    required: [id, insecure_ssl]
     properties:
-      url:        {type: string}
-      events:     {type: array, items: {type: string}}
-      company_id: {type: string}
+      id: {type: string}
+      insecure_ssl:
+        type: boolean
+        enum: [false]

@@ -9,11 +9,12 @@ spec:
   idempotent: true
   resource_types: [webhook_subscription]
   description: >
-    Observe (read) webhook subscriptions at NFe.io. With filter {id}
-    returns a single-entry result (GET /v2/webhooks/{id}); otherwise
-    paginates GET /v2/webhooks.
+    Observe one pre-existing webhook by exact ID with GET
+    /v2/webhooks/{id}. Enumeration and attribute-based adoption are
+    deliberately unavailable. Output contains no provider secrets,
+    URI, headers, properties, or raw payload.
   input_schema:
     type: object
+    required: [id]
     properties:
-      id:     {type: string}
-      cursor: {type: string}
+      id: {type: string}
