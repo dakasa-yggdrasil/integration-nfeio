@@ -1,5 +1,22 @@
 # Changelog
 
+## v3.1.1 - 2026-09-05
+
+### Fixed
+
+- Bumped `yggdrasil-sdk-go` from v0.8.3 to v0.9.1. AMQP startup now
+  passively requires the fixed `describe` and `execute` queues to exist instead
+  of silently creating queues with broker defaults. Permanent access or
+  availability failures during reconnect now make the adapter runtime exit
+  instead of remaining ready with zero consumers.
+
+### Operations
+
+- Import the canonical RabbitMQ definitions before rolling this version. The
+  passive SDK gate fails on missing/inaccessible queues but cannot distinguish
+  classic from quorum; the rollout must verify durable quorum attributes
+  through RabbitMQ management before starting NFe.io.
+
 ## v3.1.0 - 2026-09-05
 
 ### Security

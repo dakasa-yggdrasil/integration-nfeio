@@ -13,8 +13,8 @@ func TestSpec_Constants(t *testing.T) {
 	if IntegrationType != "nfeio" {
 		t.Fatalf("IntegrationType = %q; want nfeio", IntegrationType)
 	}
-	if AdapterVersion != "3.1.0" {
-		t.Fatalf("AdapterVersion = %q; want 3.1.0 for exact-ID HMAC migration", AdapterVersion)
+	if AdapterVersion != "3.1.1" {
+		t.Fatalf("AdapterVersion = %q; want 3.1.1 for passive quorum topology", AdapterVersion)
 	}
 }
 

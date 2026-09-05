@@ -37,7 +37,7 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
 ## Transport & version
 
-- **`AdapterVersion = "3.1.0"`** (in `spec.go`; also the default for the
+- **`AdapterVersion = "3.1.1"`** (in `spec.go`; also the default for the
   link-time-overridable `main.Version`).
 - **Default transport is `http_json`** — RPC served on **port 8081**
   (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
@@ -164,7 +164,7 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
 ## Manifest ↔ `spec.go`
 
 `manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
-is currently **in sync** with `spec.go` (version `3.1.0`, no `register_company`
+is currently **in sync** with `spec.go` (version `3.1.1`, no `register_company`
 default action, `thirdparty.nfeio.municipality_template` prefix,
 `.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, upper-case
 credential keys, `environment` enum). **`Describe()` is authoritative; do not

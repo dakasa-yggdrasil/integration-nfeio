@@ -17,7 +17,7 @@ read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
 
 ## Quick facts
 
-- **Version:** `AdapterVersion = "3.1.0"` (`spec.go`).
+- **Version:** `AdapterVersion = "3.1.1"` (`spec.go`).
 - **Transport:** default `http_json`, RPC on `:8081` (`/rpc/describe` +
   `/rpc/execute`); AMQP opt-in via `YGGDRASIL_TRANSPORT=amqp` + `BROKER_URL`
   (queues `yggdrasil.adapter.nfeio.{describe,execute}`). Health `:8080`,

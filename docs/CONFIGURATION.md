@@ -80,7 +80,11 @@ applied when unset.
   those endpoints. This is the default the K8s Service and forward-drift auto-sync use.
 - **`amqp`** (also `rabbitmq`) — consumes from queues
   `yggdrasil.adapter.nfeio.describe` / `yggdrasil.adapter.nfeio.execute`; requires
-  `BROKER_URL`. `Describe()` then advertises `transport: rabbitmq` with those queues.
+  `BROKER_URL`. The queues must already exist as durable quorum queues: SDK
+  v0.9.1 checks existence passively and never creates fixed topology. Passive
+  AMQP does not compare queue attributes, so rollout must verify quorum and
+  durability through RabbitMQ management. `Describe()`
+  then advertises `transport: rabbitmq` with those queues.
 
 ## Cross-references
 
