@@ -38,7 +38,7 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
 ## Transport & version
 
-- **`AdapterVersion = "2.3.0"`** (in `spec.go`; also the default for the
+- **`AdapterVersion = "3.0.0"`** (in `spec.go`; also the default for the
   link-time-overridable `main.Version`).
 - **Default transport is `http_json`** — RPC served on **port 8081**
   (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
@@ -73,9 +73,9 @@ resource lifecycles, with documented helper/action exceptions).
 | `manage_template` | municipality_template | control-plane: get/list/validate templates |
 | `bulk_issue` | service_invoice | bulk action — up to 50, semaphore 5, partial-failure |
 | `calculate_iss` | municipality_template | pure-function helper — ISS from template |
-| `ensure_webhook_subscription` | webhook_subscription | POST /v2/webhooks; adopt-or-patch |
-| `observe_webhook_subscriptions` | webhook_subscription | filter by `{id}` or list |
-| `destroy_webhook_subscription` | webhook_subscription | DELETE; 404 → already-absent success |
+| `ensure_webhook_subscription` | webhook_subscription | exact-ID GET/PUT; only `insecureSsl=false` |
+| `observe_webhook_subscriptions` | webhook_subscription | exact `{id}` only; no list/discovery |
+| `destroy_webhook_subscription` | webhook_subscription | exact ID + matching `confirm_id`; not a default action |
 | `nfse_webhook_received` *(reactor)* | service_invoice | NOT an execute op — webhook-server-triggered |
 
 The four non-prefix names (`retrieve_pdf`, `retrieve_xml`, `manage_template`,
@@ -85,17 +85,8 @@ resource. The rationale is documented inline in `actionCatalog()` in `spec.go`.
 
 ### Legacy aliases
 
-Pre-v2.0.0 names are still accepted, so older callers and stored envelopes keep
-working. They route through `reconcile.WithLegacyNames(...)` (the reconcile
-dispatch in `reconcilers.go`) and the legacy fallback cases in `executeRoute`
-(`adapter.go`). Do **not** add new ones — they exist only for back-compat:
-
-- service_invoice: `issue_nfse`, `get_nfse_status`, `cancel_nfse`,
-  `list_service_invoices`
-- company: `register_company`, `update_company`
-- municipality: `list_municipalities`
-- webhook_subscription: `create_webhook_endpoint`, `delete_webhook_endpoint`,
-  `list_webhook_endpoints`
+The one-minor compatibility aliases from v2 were removed at the v3.0.0 major
+boundary. Only canonical capability names are accepted.
 
 ## Repo layout
 
@@ -120,8 +111,8 @@ Dockerfile                    # golang:1.25 → distroless; EXPOSE 8080 8081 808
 Key files in `providers/nfeio/adapter/`:
 
 - `spec.go` — `Describe()` contract, capability constants, `SupportedExecuteOperations`, action catalog, Prometheus metrics. **Source of truth.**
-- `adapter.go` — `DescribeHandler`, `ExecuteHandler`, `executeRoute` switch (canonical ops + legacy-alias fallbacks).
-- `reconcilers.go` — `WireReconcilersWithInstance`: installs the SDK reconcile dispatch (ensure/observe/destroy triples + legacy names + §6.5 mutation-event emission) ahead of the legacy execute switch.
+- `adapter.go` — `DescribeHandler`, `ExecuteHandler`, `executeRoute` switch for canonical ops and allowlisted actions.
+- `reconcilers.go` — `WireReconcilersWithInstance`: installs the SDK reconcile dispatch (ensure/observe/destroy triples + §6.5 mutation-event emission) ahead of the action switch.
 - `client.go` / `bearer.go` — NFe.io v2 HTTP client + auth.
 - `webhook_server.go` — inbound webhook listener: HMAC verify → LRU dedup → normalize → publish.
 - `publish_dispatch.go` — republishes normalized webhook events to `enterprise-payments.*`.
@@ -172,7 +163,7 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
 ## Manifest ↔ `spec.go`
 
 `manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
-is currently **in sync** with `spec.go` (version `2.3.0`, no `register_company`
+is currently **in sync** with `spec.go` (version `3.0.0`, no `register_company`
 default action, `thirdparty.nfeio.municipality_template` prefix,
 `.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, upper-case
 credential keys, `environment` enum). **`Describe()` is authoritative; do not

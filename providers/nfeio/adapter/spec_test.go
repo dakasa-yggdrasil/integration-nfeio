@@ -13,8 +13,8 @@ func TestSpec_Constants(t *testing.T) {
 	if IntegrationType != "nfeio" {
 		t.Fatalf("IntegrationType = %q; want nfeio", IntegrationType)
 	}
-	if AdapterVersion == "" {
-		t.Fatal("AdapterVersion must not be empty")
+	if AdapterVersion != "3.0.0" {
+		t.Fatalf("AdapterVersion = %q; want 3.0.0 for the breaking exact-ID webhook contract", AdapterVersion)
 	}
 }
 
@@ -172,6 +172,11 @@ func TestSpec_NfeioWebhookSubscriptionResourceType(t *testing.T) {
 	desc := Describe()
 	for _, rt := range desc.ResourceTypes {
 		if rt.Name == "webhook_subscription" {
+			for _, action := range rt.DefaultActions {
+				if action == OpDestroyWebhookSubscription {
+					t.Fatal("destroy_webhook_subscription must not be a webhook default action")
+				}
+			}
 			return
 		}
 	}

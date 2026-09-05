@@ -87,7 +87,7 @@ Every Yggdrasil adapter exposes two mandatory operations:
   `ensure_/observe_/destroy_` triples, which also auto-emit mutation events to core),
   then fall back to the hand-written `executeRoute` switch for the helpers
   (`retrieve_pdf`, `retrieve_xml`, `manage_template`, `bulk_issue`, `calculate_iss`,
-  `observe_municipalities`) and the pre-v2.0.0 legacy aliases.
+  `observe_municipalities`). Legacy aliases were removed at v3.0.0.
 
 The reactor `nfse_webhook_received` is **not** part of `execute` — it is triggered by
 the inbound webhook HTTP server.
@@ -129,6 +129,6 @@ docs in the same change.
 |---|---|
 | Go | 1.25 |
 | `yggdrasil-sdk-go` | v0.8.3 |
-| Adapter version (`Describe()`) | 2.3.0 |
+| Adapter version (`Describe()`) | 3.0.0 |
 | Transports | `http_json` (default), `amqp` |
 </content>

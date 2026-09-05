@@ -9,31 +9,25 @@ import (
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/rpc"
+	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/events"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/reconcile"
+	"go.uber.org/zap"
 )
 
-// TestE2E_NfeioLegacyIssueNfseShim locks Task 32 step 2: invoking the
-// pre-v2.0.0 `issue_nfse` name through the SDK dispatch path MUST route
-// to ensure_service_invoice AND emit exactly one WARN log entry. Without
-// this, callers that fail to migrate would silently dispatch to the wrong
-// canonical handler.
-func TestE2E_NfeioLegacyIssueNfseShim(t *testing.T) {
+func TestE2E_NfeioV3RejectsLegacyIssueNfseAlias(t *testing.T) {
 	templates := mustLoadTestTemplates(t)
+	var calls int
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"inv-shim","status":"Processing","externalId":"inv-001","flowStatus":"WaitingSendToAuthorize"}`))
+		calls++
 	})
 	defer srv.Close()
 	cli := mustNewClient(t, srv.URL)
 
-	var warns int
 	a := sdkadapter.New(sdkadapter.Config{Provider: Provider, IntegrationType: IntegrationType})
-	reconcile.RegisterReconciler[serviceInvoiceDesired, serviceInvoiceObserved](
-		a, "service_invoice", "service_invoices",
-		newServiceInvoiceReconciler(cli, templates),
-		reconcile.WithLegacyNames("issue_nfse"),
-		reconcile.WithWarnLogger(func(string, ...any) { warns++ }),
-	)
+	WireReconcilersWithInstance(a, cli, templates, "")
+	handler := ExecuteHandler(zap.NewNop(), a, cli, templates, &ExecuteDeps{
+		MunicipalitiesCache: NewMunicipalitiesCache(0),
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"operation": "issue_nfse",
@@ -51,15 +45,48 @@ func TestE2E_NfeioLegacyIssueNfseShim(t *testing.T) {
 			Description:   "Hosting service",
 		},
 	})
-	resp, _, err := reconcile.ExecuteForTest(context.Background(), a, rpc.Delivery{Body: body})
-	if err != nil {
-		t.Fatalf("legacy issue_nfse dispatch failed: %v", err)
+	_, _, err := handler(context.Background(), rpc.Delivery{Body: body})
+	if err == nil || !strings.Contains(err.Error(), "unknown operation") {
+		t.Fatalf("legacy operation must be rejected at v3, got err=%v", err)
 	}
-	if !strings.Contains(string(resp), `"id":"inv-shim"`) {
-		t.Fatalf("expected canonical ensure_service_invoice path to return id; got %s", resp)
+	if calls != 0 {
+		t.Fatalf("legacy operation made %d provider calls; want zero", calls)
 	}
-	if warns != 1 {
-		t.Fatalf("expected exactly 1 WARN entry, got %d", warns)
+}
+
+func TestE2E_NfeioV3RejectsLegacyWebhookAliasesWithoutProviderCalls(t *testing.T) {
+	var calls int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+	})
+	defer srv.Close()
+	cli := mustNewClient(t, srv.URL)
+
+	a := sdkadapter.New(sdkadapter.Config{Provider: Provider, IntegrationType: IntegrationType})
+	WireReconcilersWithInstance(a, cli, nil, "")
+	handler := ExecuteHandler(zap.NewNop(), a, cli, nil, nil)
+
+	for _, operation := range []string{
+		"create_webhook_endpoint",
+		"list_webhook_endpoints",
+		"delete_webhook_endpoint",
+	} {
+		body, _ := json.Marshal(map[string]any{
+			"operation": operation,
+			"input": map[string]any{
+				"id":     "wh-1",
+				"url":    "https://example.invalid/" + propertyCanary,
+				"events": []string{"Issued"},
+			},
+		})
+		_, _, err := handler(context.Background(), rpc.Delivery{Body: body})
+		if err == nil || !strings.Contains(err.Error(), "unknown operation") {
+			t.Fatalf("legacy operation %q must be rejected, got err=%v", operation, err)
+		}
+		assertSecretFree(t, err.Error())
+	}
+	if calls != 0 {
+		t.Fatalf("legacy webhook aliases made %d provider calls; want zero", calls)
 	}
 }
 
@@ -111,9 +138,9 @@ func TestE2E_NfeioCanonicalEnsureServiceInvoice(t *testing.T) {
 	}
 }
 
-// TestE2E_NfeioWebhookSubscriptionDestroyShim locks the destroy_webhook_subscription
-// canonical → DELETE /v2/webhooks/{id} path through the SDK dispatch.
-func TestE2E_NfeioWebhookSubscriptionDestroyShim(t *testing.T) {
+// TestE2E_NfeioWebhookSubscriptionDestroyWithConfirmation locks the guarded
+// canonical destroy path through the SDK dispatch.
+func TestE2E_NfeioWebhookSubscriptionDestroyWithConfirmation(t *testing.T) {
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete || r.URL.Path != "/v2/webhooks/wh-99" {
 			t.Errorf("got %s %s; want DELETE /v2/webhooks/wh-99", r.Method, r.URL.Path)
@@ -131,7 +158,7 @@ func TestE2E_NfeioWebhookSubscriptionDestroyShim(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]any{
 		"operation": "destroy_webhook_subscription",
-		"input":     map[string]any{"ref": "wh-99"},
+		"input":     map[string]any{"ref": "wh-99", "confirm_id": "wh-99"},
 	})
 	resp, _, err := reconcile.ExecuteForTest(context.Background(), a, rpc.Delivery{Body: body})
 	if err != nil {
@@ -140,4 +167,80 @@ func TestE2E_NfeioWebhookSubscriptionDestroyShim(t *testing.T) {
 	if !strings.Contains(string(resp), `"deleted":true`) {
 		t.Fatalf("expected deleted:true in destroy response, got %s", resp)
 	}
+}
+
+func TestE2E_NfeioWebhookSubscriptionDestroyWithoutConfirmationNeverDeletes(t *testing.T) {
+	var calls int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+	})
+	defer srv.Close()
+	cli := mustNewClient(t, srv.URL)
+
+	a := sdkadapter.New(sdkadapter.Config{Provider: Provider, IntegrationType: IntegrationType})
+	reconcile.RegisterReconciler[webhookSubDesired, webhookSubObserved](
+		a, "webhook_subscription", "webhook_subscriptions",
+		newWebhookSubReconciler(cli),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"operation": "destroy_webhook_subscription",
+		"input":     map[string]any{"ref": "wh-99"},
+	})
+	_, _, err := reconcile.ExecuteForTest(context.Background(), a, rpc.Delivery{Body: body})
+	if err == nil {
+		t.Fatal("destroy without exact confirmation must fail")
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls = %d; want zero", calls)
+	}
+}
+
+type webhookCaptureEmitter struct {
+	events []events.MutationEvent
+}
+
+func (e *webhookCaptureEmitter) Emit(_ context.Context, event events.MutationEvent) error {
+	e.events = append(e.events, event)
+	return nil
+}
+
+func TestE2E_NfeioWebhookSubscriptionEnsureEventNeverExposesProviderSecrets(t *testing.T) {
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v2/webhooks/wh-1" {
+			t.Fatalf("got %s %s; want exact GET", r.Method, r.URL.Path)
+		}
+		writeWebhookResponse(t, w, webhookProviderObject("wh-1", false))
+	})
+	defer srv.Close()
+
+	emitter := &webhookCaptureEmitter{}
+	a := sdkadapter.New(sdkadapter.Config{Provider: Provider, IntegrationType: IntegrationType})
+	reconcile.RegisterReconciler[webhookSubDesired, webhookSubObserved](
+		a, "webhook_subscription", "webhook_subscriptions",
+		newWebhookSubReconciler(mustNewClient(t, srv.URL)),
+		reconcile.WithProvider(Provider),
+		reconcile.WithEmitter(emitter),
+		reconcile.WithInstanceID("nfeio-dakasa"),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"operation": "ensure_webhook_subscription",
+		"input": map[string]any{
+			"id":           "wh-1",
+			"insecure_ssl": false,
+			"__instance_credentials": map[string]any{
+				"secret": webhookSecretCanary,
+			},
+		},
+	})
+	resp, _, err := reconcile.ExecuteForTest(context.Background(), a, rpc.Delivery{Body: body})
+	if err != nil {
+		t.Fatalf("ensure dispatch failed: %v", err)
+	}
+	if len(emitter.events) != 1 {
+		t.Fatalf("mutation events = %d; want one", len(emitter.events))
+	}
+	encodedEvents, _ := json.Marshal(emitter.events)
+	assertSecretFree(t, string(resp)+string(encodedEvents))
 }
