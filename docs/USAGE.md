@@ -27,7 +27,7 @@ docker build -t integration-nfeio:dev .
 
 docker run --rm \
   -e NFEIO_API_KEY=sk_live_xxx \
-  -e NFEIO_WEBHOOK_SECRET=whsec_xxx \
+  -e NFEIO_WEBHOOK_SECRET=replace_with_32_char_secret_here \
   -p 8080:8080 -p 8081:8081 -p 8082:8082 \
   integration-nfeio:dev
 ```
@@ -40,7 +40,8 @@ Ports:
 | `8081` | RPC (HTTP-JSON) | `/rpc/describe`, `/rpc/execute` |
 | `8082` | webhook | `/webhook/nfeio` |
 
-The worker is fatal-on-start if `NFEIO_API_KEY` or `NFEIO_WEBHOOK_SECRET` is unset.
+The worker is fatal-on-start if `NFEIO_API_KEY` is unset or if
+`NFEIO_WEBHOOK_SECRET` is not 32 to 64 characters without surrounding whitespace.
 
 ## 3. Register with yggdrasil-core
 
@@ -117,12 +118,10 @@ Read the invoice back (single-resource lookup via `{invoice_id}` filter):
     invoice_id: "{{ steps.issue-invoice.outputs.id }}"
 ```
 
-`observe_service_invoices` output includes `status` / `flow_status`. Once NFe.io
-finishes municipal processing it POSTs a webhook to `/webhook/nfeio`; the
-`nfse_webhook_received` reactor publishes the terminal state to
-`enterprise-payments.nfe.{emitted,rejected,canceled}.q`. See
-[CAPABILITIES.md](./CAPABILITIES.md#reactor-nfse_webhook_received) and the webhook
-runbook in [OPERATIONS.md](./OPERATIONS.md#webhook-runbook).
+`observe_service_invoices` output includes `status` / `flow_status`. Route real
+NFe.io callbacks to an application receiver that implements the current signed
+`payload`, `X-Hook-Id`, and `X-Hook-Event` contract. The adapter-local listener
+accepts only a legacy normalized body and must remain unexposed from NFe.io.
 
 ## 6. Other common flows
 

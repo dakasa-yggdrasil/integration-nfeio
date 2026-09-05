@@ -34,7 +34,7 @@ Run the worker locally (HTTP transport is the default):
 
 ```bash
 NFEIO_API_KEY=sk_test_xxx \
-NFEIO_WEBHOOK_SECRET=whsec_xxx \
+NFEIO_WEBHOOK_SECRET=replace_with_32_char_secret_here \
 TEMPLATES_DIR=manifest/templates \
 go run ./cmd/adapter
 ```

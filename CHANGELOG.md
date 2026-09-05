@@ -12,9 +12,13 @@
   runtime HMAC must satisfy the provider's 32 to 64 character contract, never
   enters capability input, and remains absent from outputs, mutation events,
   errors, and logs.
-- Ordinary reconciliation remains backward compatible and changes only
-  `insecureSsl=true` to `false`. The migration still targets one pre-existing
-  provider ID and cannot create, list, discover, or delete a webhook.
+- Ordinary reconciliation changes only `insecureSsl=true` to `false`, but now
+  fails closed unless the provider returns the exact runtime HMAC that the PUT
+  can preserve. The real provider omits that field, so production drift repair
+  uses the explicit migration instead of risking secret removal.
+- Corrected the optional inbound reactor to verify the provider's documented
+  HMAC-SHA1 `X-Hub-Signature` format and reject obsolete SHA-256, duplicate,
+  and comma-folded signature inputs.
 
 ## v3.0.0 - 2026-09-05
 

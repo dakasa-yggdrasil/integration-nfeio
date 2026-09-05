@@ -30,11 +30,10 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
   (cached), and read/validate the in-memory município templates this repo
   ships under `manifest/templates/` (per-município ISS rules used to
   `calculate_iss`).
-- **Webhook reactor:** a dedicated HTTP listener receives NFe.io callbacks,
-  HMAC-verifies them, dedupes (LRU), normalizes the status, and republishes to
-  the `enterprise-payments.*` queues via the `publish_message` capability on the
-  rabbitmq-topology instance. This is **not** an `execute` op — it is fired by
-  the webhook server, not the RPC bus.
+- **Legacy webhook reactor:** a dedicated HTTP listener verifies and handles
+  only the old normalized body contract. It does not parse the current NFe.io
+  payload and must remain unexposed. This is not an `execute` op; DaKasa
+  production uses Payments as the public receiver.
 
 ## Transport & version
 
@@ -51,8 +50,9 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
   2. **Health** (`:8080`, `HEALTHCHECK_PORT`) — `/healthz`, `/readyz`,
      `/metrics`. Both probes return 200; reconnect is handled inside the
      transport, so readiness is effectively "templates loaded, loop running".
-  3. **Webhook** (`:8082`, `WEBHOOK_PORT`) — inbound NFe.io callbacks at
-     `/webhook/nfeio`.
+  3. **Legacy webhook** (`:8082`, `WEBHOOK_PORT`) - normalized compatibility
+     bodies at `/webhook/nfeio`. It does not implement the current provider
+     payload contract and must remain unexposed. Payments is DaKasa's receiver.
 
 ## Capabilities (canonical names — see `spec.go`)
 
@@ -76,7 +76,7 @@ resource lifecycles, with documented helper/action exceptions).
 | `ensure_webhook_subscription` | webhook_subscription | exact-ID GET/PUT; secures TLS and supports an explicitly confirmed HMAC migration |
 | `observe_webhook_subscriptions` | webhook_subscription | exact `{id}` only; no list/discovery |
 | `destroy_webhook_subscription` | webhook_subscription | exact ID + matching `confirm_id`; not a default action |
-| `nfse_webhook_received` *(reactor)* | service_invoice | NOT an execute op — webhook-server-triggered |
+| `nfse_webhook_received` *(legacy reactor)* | service_invoice | NOT an execute op; normalized compatibility body only, never the production provider receiver |
 
 The four non-prefix names (`retrieve_pdf`, `retrieve_xml`, `manage_template`,
 `bulk_issue`, `calculate_iss`) are **kept by allowlist** — they are helpers,
@@ -123,8 +123,9 @@ Key files in `providers/nfeio/adapter/`:
 From `Describe()` / `config.go`:
 
 - **Credentials (required):** `NFEIO_API_KEY` (REST auth), `NFEIO_WEBHOOK_SECRET`
-  (HMAC verify of inbound webhooks). Both are secret/sensitive. `config.Load()`
-  fails fast (process exits) if either is empty.
+  (provider migration and legacy-listener HMAC). Both are secret/sensitive.
+  `config.Load()` fails fast if the API key is empty or the HMAC is not 32 to
+  64 characters without surrounding whitespace.
 - **Instance schema:** `environment` enum `production` | `sandbox` (default
   `production`).
 - **Other env knobs:** `NFEIO_COMPANY_ID` (optional default company; per-call
@@ -138,9 +139,9 @@ From `Describe()` / `config.go`:
 
 The webhook server (`webhook_server.go`) reads the raw body *before* JSON
 parsing so the HMAC covers the exact bytes NFe.io signed. It verifies
-`X-Hub-Signature-256` (falling back to `X-Hub-Signature`) against
-`NFEIO_WEBHOOK_SECRET` using `sdkwebhook.VerifyHMACSHA256Header`; a bad
-signature is `401`. After verify, it dedupes by event id (or a SHA-256 of the
+exactly one `X-Hub-Signature` in `sha1=<40 hex>` form against
+`NFEIO_WEBHOOK_SECRET` using HMAC-SHA1; a bad, duplicate, comma-folded, or
+obsolete `X-Hub-Signature-256` signature is `401`. After verify, it dedupes by event id (or a SHA-256 of the
 body when no id is present) through an LRU cache, then normalizes and publishes.
 
 ## Mandatory adapter rules

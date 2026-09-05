@@ -19,16 +19,16 @@ spec:
     (domain: payments). Ensures companies and reconciles known webhook
     subscriptions, issues/observes/cancels service invoices (NFSe),
     bulk-issues up to 50 NFSe, retrieves signed PDF/XML URLs, computes ISS, and lists
-    supported municipalities. A dedicated webhook server HMAC-verifies
-    inbound NFe.io callbacks, dedupes, normalizes status, and republishes
-    to the enterprise-payments.* queues.
+    supported municipalities. Its adapter-local webhook server is a legacy
+    normalized-body compatibility path and must not receive current provider
+    callbacks.
     Auth via an NFe.io API key (REST) plus a webhook HMAC secret.
   providers:
     - id: runtime
       display_name: NFe.io runtime adapter
       description: |
-        HTTP client that calls the NFe.io v2 REST API, plus an inbound
-        webhook listener on /webhook/nfeio (port 8082). Company creation
+        HTTP client that calls the NFe.io v2 REST API, plus a legacy normalized
+        listener on /webhook/nfeio (port 8082) that must remain unexposed. Company creation
         adopts 409 already_registered responses. Webhooks are never created
         or discovered: an exact provider ID is required, and only the secure
         TLS flag may be reconciled to false. RPC is served over AMQP so
@@ -71,9 +71,10 @@ spec:
         - id: nfeio_webhook_secret
           label: Webhook HMAC secret
           description: |
-            HMAC secret configured on the NFe.io webhook. Used to verify
-            inbound callbacks (X-Hub-Signature-256). Maps to credential
-            NFEIO_WEBHOOK_SECRET.
+            HMAC secret configured on the NFe.io webhook. Used by exact-ID
+            security migration. The adapter-local legacy reactor also verifies
+            X-Hub-Signature: sha1=<40 hex>, but is not a supported public NFe.io
+            receiver. Maps to credential NFEIO_WEBHOOK_SECRET.
           type: string
           required: true
           sensitive: true
@@ -132,9 +133,10 @@ spec:
           description: |
             Deploy the nfeio adapter. Three listeners boot: AMQP RPC
             (describe + execute over BROKER_URL), the health/metrics server
-            (port 8080), and the inbound webhook server (port 8082,
-            /webhook/nfeio). NFEIO_API_KEY + NFEIO_WEBHOOK_SECRET are
-            mandatory — the process exits at boot if either is empty.
+            (port 8080), and the legacy normalized-body listener (port 8082,
+            /webhook/nfeio), which must remain unexposed. NFEIO_API_KEY + NFEIO_WEBHOOK_SECRET are
+            mandatory. The process exits if the API key is empty or the HMAC
+            is not 32 to 64 characters without surrounding whitespace.
           uses:
             kind: integration
             family: kubernetes
@@ -234,7 +236,7 @@ spec:
           input: {}
         timeout_seconds: 30
       post_install_hints:
-        - "The webhook listener serves /webhook/nfeio on port 8082 — this URL MUST be reachable from NFe.io (route it through the cluster ingress) before NFe.io status callbacks can be delivered."
+        - "Do not expose the legacy adapter listener on port 8082 to NFe.io. Route current signed provider callbacks to an application receiver that implements X-Hook-Id, X-Hook-Event, and payload state validation."
         - "Create the callback manually in NFe.io, record its exact provider ID, then use ensure_webhook_subscription with that ID and insecure_ssl=false only after the public TLS ingress cutover. The adapter never creates or discovers webhooks."
         - "Issue an NFSe: family=payments, operation=ensure_service_invoice (idempotent on external_id)."
         - "Bulk-issue up to 50 NFSe at once: family=payments, operation=bulk_issue."

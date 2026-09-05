@@ -24,10 +24,9 @@
 # queue. But HTTP-JSON is the default transport for this adapter,
 # and forward-drift auto-sync uses the HTTP describe endpoint regardless.
 #
-# Webhook port 8082 (NFe.io inbound callbacks — HMAC-verified) is
-# deliberately NOT included in this Service. The webhook path is
-# routed through the cluster ingress to the dedicated webhook
-# listener; see providers/nfeio/adapter/webhook_server.go.
+# Webhook port 8082 is a legacy normalized-body compatibility listener and is
+# deliberately NOT included in this Service. Do not route current NFe.io
+# provider ingress to it; DaKasa production terminates callbacks in Payments.
 
 apiVersion: v1
 kind: Service

@@ -76,6 +76,17 @@ GET must prove secure TLS and absence of the legacy header. NFe.io does not
 return the HMAC after write, so a provider-signed callback received by Payments
 is the final proof that the provider stored the same value.
 
+An ordinary TLS-only PUT now fails closed unless the provider returns a secret
+that exactly matches the 32 to 64 character runtime HMAC. This prevents a later
+full-object PUT from clearing or replacing the HMAC when the provider GET omits
+or redacts it. Exact IDs `.` and `..` and JSON `null` migration fields are also
+rejected before mutation.
+
+The optional adapter-side HTTP reactor now verifies the documented
+`X-Hub-Signature: sha1=<40 hex>` contract over the exact raw bytes and rejects
+the obsolete SHA-256 header path. The DaKasa production runtime remains private;
+Payments is the only public NFe.io receiver.
+
 ## Validation
 
 The following checks passed:
@@ -91,7 +102,9 @@ git diff --check
 Focused tests cover the exact GET, PUT, GET sequence, preservation of opaque
 provider fields, runtime-only HMAC use, case-insensitive removal of legacy
 Authorization, post-PUT confirmation failure, partial input rejection, invalid
-runtime credential rejection, and secret-free outputs and errors.
+runtime credential rejection, secret-free outputs and errors, fail-closed
+ordinary drift, dot-segment IDs, null migration inputs, and strict provider
+HMAC-SHA1 header verification.
 
 ## Production order
 

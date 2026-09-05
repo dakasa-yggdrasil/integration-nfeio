@@ -177,10 +177,12 @@ Canonical prefix `thirdparty.nfeio.webhook_subscription` · identity
 
 ### `ensure_webhook_subscription`
 Reconcile one webhook that already exists at NFe.io. The adapter performs an exact
-`GET /v2/webhooks/{id}`. If and only if the provider object has
-`insecureSsl=true`, it sends an exact-ID `PUT` with that field changed to `false`,
-preserves every other field, then confirms the result with another exact-ID GET.
-It never POSTs, lists, matches by URI, or adopts by mutable attributes.
+`GET /v2/webhooks/{id}`. A secure object is a no-op. If the provider object has
+`insecureSsl=true`, an ordinary run sends the exact-ID `PUT` only when the GET
+contains a nonempty secret that can be preserved. Because the real API omits
+that field, such a run otherwise fails closed and requires the explicitly
+confirmed security migration below. It never POSTs, lists, matches by URI, or
+adopts by mutable attributes.
 
 For a one-time security migration, the same capability can copy the HMAC already
 projected as the adapter runtime credential into the provider object and remove
@@ -224,11 +226,17 @@ Category `reactor`, resource type `service_invoice`. **Not callable via `execute
 it is triggered by the inbound webhook HTTP server (port `8082`, path
 `/webhook/nfeio`).
 
+This is a legacy normalized-body reactor, not a supported public NFe.io receiver.
+It does not parse the provider's current `X-Hook-Id`, `X-Hook-Event`, and signed
+`payload` state contract. Keep port `8082` unexposed. DaKasa production routes
+NFe.io directly to the Payments service.
+
 Pipeline (see `providers/nfeio/adapter/webhook_server.go`):
 
-1. Read the raw body once, then verify `X-Hub-Signature-256` (falls back to
-   `X-Hub-Signature`) as HMAC-SHA256 over those exact bytes using
-   `NFEIO_WEBHOOK_SECRET`. Invalid → `401`.
+1. Read the raw body once, then require exactly one `X-Hub-Signature` in
+   `sha1=<40 hex>` form and verify HMAC-SHA1 over those exact bytes using
+   `NFEIO_WEBHOOK_SECRET`. Invalid, duplicate, comma-folded, or obsolete
+   `X-Hub-Signature-256` input returns `401`.
 2. Dedupe by event `id` (LRU, 4096 entries); falls back to a SHA-256 body hash when
    the payload has no `id`. Duplicate → `200 {"status":"duplicate"}`.
 3. Normalize the polymorphic NFe.io event vocabulary to one of `issued`,

@@ -44,7 +44,7 @@ An OpenTelemetry span is emitted per NFe.io HTTP call (`go.opentelemetry.io/otel
 |---|---|---|
 | `8080` | health/metrics | yes (`health`) |
 | `8081` | RPC (`/rpc/describe`, `/rpc/execute`) | yes (`rpc`) |
-| `8082` | webhook (`/webhook/nfeio`) | **no** — routed via cluster ingress to the dedicated listener |
+| `8082` | legacy normalized-body listener (`/webhook/nfeio`) | **no**; do not route provider ingress here |
 
 > `deploy/service.yaml` must expose both `8080` **and** `8081`. Pre-2.2.3 the live
 > Service only declared `8080`, so `yggdrasil-core` forward-drift auto-sync hit
@@ -54,6 +54,10 @@ An OpenTelemetry span is emitted per NFe.io HTTP call (`go.opentelemetry.io/otel
 
 ## Webhook runbook
 
+> This runbook covers the legacy normalized-body compatibility listener only.
+> It does not implement NFe.io's current provider payload contract. Keep it
+> unexposed. DaKasa production routes the provider to Payments.
+
 The webhook listener (`:8082`, `/webhook/nfeio`) implements the `nfse_webhook_received`
 reactor pipeline. Failure modes and their responses:
 
@@ -61,7 +65,7 @@ reactor pipeline. Failure modes and their responses:
 |---|---|---|---|
 | `read body` | 400 | Body unreadable | Transient; NFe.io will retry. |
 | `invalid signature` | 401 | HMAC mismatch | Confirm `NFEIO_WEBHOOK_SECRET` matches the secret set in NFe.io → Webhooks. The signature is verified over the **raw** request bytes. |
-| `decode` | 400 | Body is not the expected JSON envelope | Inspect the payload; NFe.io schema change. |
+| `decode` | 400 | Body is not the legacy normalized JSON envelope | Do not route current NFe.io provider traffic here. |
 | `{"status":"duplicate"}` | 200 | Event already seen (LRU 4096 by `id`, body-hash fallback) | Expected on NFe.io retries; watch `nfeio_dedup_hits_total`. |
 | `202 Accepted` (logged, not enqueued) | 202 | Unknown/unmapped event | Event not in the normalize table; check `webhook unknown event` logs. Returning 202 avoids an NFe.io retry storm. |
 | `publish failed` | 500 | `publish_message` to core failed | NFe.io retries. Check `YGGDRASIL_CORE_URL`, `YGGDRASIL_RUN_TOKEN`, and that the `rabbitmq-topology` instance (`RABBITMQ_TOPOLOGY_INSTANCE`) is healthy. |
@@ -76,7 +80,7 @@ event` and drops the message — verify `YGGDRASIL_CORE_URL` is set at startup.
 
 | Failure | Likely cause |
 |---|---|
-| Worker exits on boot with `config load` fatal | `NFEIO_API_KEY` or `NFEIO_WEBHOOK_SECRET` unset — both are mandatory. |
+| Worker exits on boot with `config load` fatal | `NFEIO_API_KEY` is unset or `NFEIO_WEBHOOK_SECRET` is outside 32 to 64 characters or has surrounding whitespace. |
 | Worker exits with `template load` fatal | `TEMPLATES_DIR` points at an unreadable dir and the embedded fallback also failed. |
 | `YGGDRASIL_TRANSPORT=amqp` fatal at boot | `BROKER_URL` is empty under AMQP transport. |
 | Describe registration rejected by core | Live `Describe()` shape drifted from the stored `integration_type` manifest. Re-check `spec.go` vs `manifest/integration_type.nfeio.yaml`. |

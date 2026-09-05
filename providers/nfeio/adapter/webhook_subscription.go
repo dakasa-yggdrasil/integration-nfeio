@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -59,14 +60,23 @@ func (in *EnsureWebhookSubscriptionInput) UnmarshalJSON(data []byte) error {
 			}
 			in.InsecureSSL = &value
 		case "set_hmac_from_runtime":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription security migration flag must be a boolean")
+			}
 			if err := json.Unmarshal(raw, &in.SetHMACFromRuntime); err != nil {
 				return errors.New("webhook_subscription security migration flag must be a boolean")
 			}
 		case "remove_legacy_authorization":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription legacy authorization flag must be a boolean")
+			}
 			if err := json.Unmarshal(raw, &in.RemoveLegacyAuthorization); err != nil {
 				return errors.New("webhook_subscription legacy authorization flag must be a boolean")
 			}
 		case "confirm_security_migration_id":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription security migration confirmation must be a string")
+			}
 			if err := json.Unmarshal(raw, &in.ConfirmSecurityMigrationID); err != nil {
 				return errors.New("webhook_subscription security migration confirmation must be a string")
 			}
@@ -147,6 +157,17 @@ func (d webhookDocument) insecureSSL() (bool, bool) {
 	return value, true
 }
 
+func (d webhookDocument) hasMatchingRuntimeSecret(runtimeHMAC string) bool {
+	raw, ok := d.fields[webhookSecretField]
+	if !ok || !validRuntimeWebhookSecret(runtimeHMAC) {
+		return false
+	}
+	var secret string
+	return json.Unmarshal(raw, &secret) == nil &&
+		validRuntimeWebhookSecret(secret) &&
+		hmac.Equal([]byte(secret), []byte(runtimeHMAC))
+}
+
 func (d webhookDocument) desiredFields(in EnsureWebhookSubscriptionInput, runtimeHMAC string) (map[string]json.RawMessage, error) {
 	fields := make(map[string]json.RawMessage, len(d.fields))
 	for name, raw := range d.fields {
@@ -222,6 +243,9 @@ func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhoo
 	if !insecureSSL && !in.SetHMACFromRuntime {
 		return safeWebhookOutput(in.ID, false, false), nil
 	}
+	if insecureSSL && !in.SetHMACFromRuntime && !current.hasMatchingRuntimeSecret(cli.cfg.WebhookSecret) {
+		return nil, errors.New("ensure_webhook_subscription: exact-ID security migration is required before provider update")
+	}
 
 	desired, err := current.desiredFields(in, cli.cfg.WebhookSecret)
 	if err != nil {
@@ -275,11 +299,15 @@ func validateWebhookEnsureInput(in EnsureWebhookSubscriptionInput, runtimeHMAC s
 			in.ConfirmSecurityMigrationID != in.ID {
 			return errors.New("ensure_webhook_subscription: complete exact-ID security migration confirmation is required")
 		}
-		if len(runtimeHMAC) < 32 || len(runtimeHMAC) > 64 || strings.TrimSpace(runtimeHMAC) != runtimeHMAC {
+		if !validRuntimeWebhookSecret(runtimeHMAC) {
 			return errors.New("ensure_webhook_subscription: runtime security credential is invalid")
 		}
 	}
 	return nil
+}
+
+func validRuntimeWebhookSecret(value string) bool {
+	return len(value) >= 32 && len(value) <= 64 && strings.TrimSpace(value) == value
 }
 
 func safeWebhookOutput(id string, insecureSSL, updated bool) *EnsureWebhookSubscriptionOutput {
@@ -318,7 +346,7 @@ func sanitizeWebhookProviderError(operation string, err error) error {
 }
 
 func validWebhookID(id string) bool {
-	if id == "" || len(id) > 128 || strings.TrimSpace(id) != id {
+	if id == "" || id == "." || id == ".." || len(id) > 128 || strings.TrimSpace(id) != id {
 		return false
 	}
 	for _, char := range id {
