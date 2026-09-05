@@ -182,7 +182,19 @@ Reconcile one webhook that already exists at NFe.io. The adapter performs an exa
 preserves every other field, then confirms the result with another exact-ID GET.
 It never POSTs, lists, matches by URI, or adopts by mutable attributes.
 
+For a one-time security migration, the same capability can copy the HMAC already
+projected as the adapter runtime credential into the provider object and remove
+every case variant of the legacy `Authorization` callback header. This path is
+enabled only when all three fields below are present and the confirmation ID
+exactly matches `id`. A partial request fails before any provider call. Because
+NFe.io does not return the HMAC after write, a successful PUT plus the exact-ID
+confirmation proves TLS and legacy-header removal; a provider-signed receiver
+canary remains the operational proof that the HMAC itself is active.
+
 - **Required input:** `id`, `insecure_ssl` (must be `false`).
+- **Optional atomic security migration:** `set_hmac_from_runtime=true`,
+  `remove_legacy_authorization=true`, and `confirm_security_migration_id` equal
+  to `id`. Supplying any subset is rejected.
 - **Output:** `id`, `insecure_ssl`, `adopted`, and `updated` only.
 - **Secret boundary:** provider `secret`, `uri`, `headers`, `properties`, raw
   payload, and future unknown fields are never returned in resources, adoption

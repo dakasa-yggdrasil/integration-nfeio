@@ -10,14 +10,25 @@ spec:
   resource_types: [webhook_subscription]
   description: >
     Reconcile one pre-existing NFe.io webhook by exact ID. GET then PUT
-    /v2/webhooks/{id}; only insecureSsl=true to false is mutable. The
-    adapter never creates, lists, or adopts by mutable attributes and
-    preserves every other provider field.
+    /v2/webhooks/{id}. Ordinary runs only set insecureSsl=false. An
+    explicitly confirmed security migration may also set the provider HMAC
+    from the already projected runtime credential and remove legacy
+    Authorization. The adapter never creates, lists, or adopts by mutable
+    attributes and preserves every other provider field.
   input_schema:
     type: object
+    additionalProperties: false
     required: [id, insecure_ssl]
     properties:
       id: {type: string}
       insecure_ssl:
         type: boolean
         enum: [false]
+      set_hmac_from_runtime:
+        type: boolean
+        default: false
+      remove_legacy_authorization:
+        type: boolean
+        default: false
+      confirm_security_migration_id:
+        type: string

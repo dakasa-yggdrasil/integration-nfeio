@@ -1,5 +1,21 @@
 # Changelog
 
+## v3.1.0 - 2026-09-05
+
+### Security
+
+- Extended exact-ID webhook reconciliation with an atomic, explicitly
+  confirmed migration that sets the provider HMAC from the adapter's existing
+  runtime credential and removes every case variant of the legacy static
+  `Authorization` callback header.
+- Partial or mismatched migration requests fail before any provider call. The
+  runtime HMAC must satisfy the provider's 32 to 64 character contract, never
+  enters capability input, and remains absent from outputs, mutation events,
+  errors, and logs.
+- Ordinary reconciliation remains backward compatible and changes only
+  `insecureSsl=true` to `false`. The migration still targets one pre-existing
+  provider ID and cannot create, list, discover, or delete a webhook.
+
 ## v3.0.0 - 2026-09-05
 
 ### Security

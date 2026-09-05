@@ -38,7 +38,7 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
 ## Transport & version
 
-- **`AdapterVersion = "3.0.0"`** (in `spec.go`; also the default for the
+- **`AdapterVersion = "3.1.0"`** (in `spec.go`; also the default for the
   link-time-overridable `main.Version`).
 - **Default transport is `http_json`** — RPC served on **port 8081**
   (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
@@ -73,7 +73,7 @@ resource lifecycles, with documented helper/action exceptions).
 | `manage_template` | municipality_template | control-plane: get/list/validate templates |
 | `bulk_issue` | service_invoice | bulk action — up to 50, semaphore 5, partial-failure |
 | `calculate_iss` | municipality_template | pure-function helper — ISS from template |
-| `ensure_webhook_subscription` | webhook_subscription | exact-ID GET/PUT; only `insecureSsl=false` |
+| `ensure_webhook_subscription` | webhook_subscription | exact-ID GET/PUT; secures TLS and supports an explicitly confirmed HMAC migration |
 | `observe_webhook_subscriptions` | webhook_subscription | exact `{id}` only; no list/discovery |
 | `destroy_webhook_subscription` | webhook_subscription | exact ID + matching `confirm_id`; not a default action |
 | `nfse_webhook_received` *(reactor)* | service_invoice | NOT an execute op — webhook-server-triggered |
@@ -163,7 +163,7 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
 ## Manifest ↔ `spec.go`
 
 `manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
-is currently **in sync** with `spec.go` (version `3.0.0`, no `register_company`
+is currently **in sync** with `spec.go` (version `3.1.0`, no `register_company`
 default action, `thirdparty.nfeio.municipality_template` prefix,
 `.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, upper-case
 credential keys, `environment` enum). **`Describe()` is authoritative; do not
