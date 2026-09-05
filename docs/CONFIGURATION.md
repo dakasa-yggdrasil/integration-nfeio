@@ -16,12 +16,10 @@ and injects them into the worker's environment as the env vars below.
 | Field / env var | Type | Required | Secret | Purpose |
 |---|---|:---:|:---:|---|
 | `NFEIO_API_KEY` | string | yes | yes | NFe.io REST API key (NFe.io → Settings → API). Authenticates every `/v2` call. |
-| `NFEIO_WEBHOOK_SECRET` | string | yes | yes | HMAC-SHA256 secret (NFe.io → Webhooks). Verifies inbound `/webhook/nfeio` callbacks. |
+| `NFEIO_WEBHOOK_SECRET` | string | yes | yes | 32 to 64 character HMAC-SHA1 secret. It verifies inbound `/webhook/nfeio` callbacks and is the runtime-only source for an explicitly confirmed provider security migration. |
 
-> The manifest (`manifest/integration_type.nfeio.yaml`) lists these under
-> `credential_schema.properties` as `nfeio_api_key` / `nfeio_webhook_secret` (lower
-> snake), while the wire `Describe()` `Required` array and the worker env vars use
-> the upper-case `NFEIO_*` form. The worker only reads the upper-case env vars.
+> The manifest (`manifest/integration_type.nfeio.yaml`), wire `Describe()`
+> contract, and worker environment all use the upper-case `NFEIO_*` names.
 
 ## Instance schema
 
@@ -52,10 +50,10 @@ applied when unset.
 | Env var | Required | Default | Read in | Purpose |
 |---|:---:|---|---|---|
 | `NFEIO_API_KEY` | **yes** | — | `config.go` | NFe.io API key. Fatal if empty. |
-| `NFEIO_WEBHOOK_SECRET` | **yes** | — | `config.go` | Webhook HMAC secret. Fatal if empty. |
+| `NFEIO_WEBHOOK_SECRET` | **yes** | - | `config.go` | Webhook HMAC secret. Fatal unless it is 32 to 64 characters without surrounding whitespace. |
 | `NFEIO_BASE_URL` | no | `https://api.nfe.io` | `config.go` | NFe.io API base URL. |
 | `NFEIO_COMPANY_ID` | no | _(empty)_ | `config.go` | Default company id; per-call override allowed. |
-| `WEBHOOK_PORT` | no | `8082` | `config.go` | Webhook listener port (`/webhook/nfeio`). |
+| `WEBHOOK_PORT` | no | `8082` | `config.go` | Legacy normalized-body listener port. Do not expose it to current NFe.io traffic. |
 | `HEALTHCHECK_PORT` | no | `8080` | `config.go` | Health + `/metrics` port. |
 | `TEMPLATES_DIR` | no | `manifest/templates` | `config.go` / `main.go` | Filesystem template dir; if present and readable it overrides the embedded templates baked into the binary. |
 | `YGGDRASIL_TRANSPORT` | no | `http_json` | `main.go` | RPC transport: `http_json`/`http` (HTTP) or `amqp`/`rabbitmq` (AMQP). |
@@ -71,7 +69,7 @@ applied when unset.
 |---|---|---|---|
 | `8080` | health/metrics | `Dockerfile EXPOSE`, `deploy/service.yaml` (`health`) | `/healthz`, `/readyz`, `/metrics`. |
 | `8081` | RPC (HTTP-JSON) | `Dockerfile EXPOSE`, `deploy/service.yaml` (`rpc`) | `/rpc/describe`, `/rpc/execute`. |
-| `8082` | webhook | `Dockerfile EXPOSE` | `/webhook/nfeio`. Deliberately **not** in `deploy/service.yaml` — routed via cluster ingress to the dedicated listener. |
+| `8082` | legacy normalized-body listener | `Dockerfile EXPOSE` | `/webhook/nfeio`. Deliberately absent from `deploy/service.yaml`; do not add provider ingress. |
 
 ## Transport
 

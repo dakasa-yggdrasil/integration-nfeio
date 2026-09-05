@@ -13,9 +13,10 @@ func setEnvs(t *testing.T, kv map[string]string) {
 }
 
 func TestLoad_Success(t *testing.T) {
+	const webhookSecret = "0123456789abcdef0123456789abcdef"
 	setEnvs(t, map[string]string{
 		"NFEIO_API_KEY":        "k123",
-		"NFEIO_WEBHOOK_SECRET": "s456",
+		"NFEIO_WEBHOOK_SECRET": webhookSecret,
 		"NFEIO_COMPANY_ID":     "cmp",
 		"NFEIO_BASE_URL":       "https://api.nfe.io",
 		"WEBHOOK_PORT":         "8082",
@@ -26,7 +27,7 @@ func TestLoad_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() err = %v", err)
 	}
-	if cfg.APIKey != "k123" || cfg.WebhookSecret != "s456" || cfg.CompanyID != "cmp" {
+	if cfg.APIKey != "k123" || cfg.WebhookSecret != webhookSecret || cfg.CompanyID != "cmp" {
 		t.Fatalf("config fields mismatch: %+v", cfg)
 	}
 	if cfg.BaseURL != "https://api.nfe.io" {
@@ -36,7 +37,7 @@ func TestLoad_Success(t *testing.T) {
 
 func TestLoad_FatalOnEmptyAPIKey(t *testing.T) {
 	os.Unsetenv("NFEIO_API_KEY")
-	t.Setenv("NFEIO_WEBHOOK_SECRET", "s")
+	t.Setenv("NFEIO_WEBHOOK_SECRET", "0123456789abcdef0123456789abcdef")
 	_, err := Load()
 	if err == nil {
 		t.Fatal("Load() must error when NFEIO_API_KEY is empty")
@@ -54,7 +55,7 @@ func TestLoad_FatalOnEmptyWebhookSecret(t *testing.T) {
 
 func TestLoad_DefaultsApplied(t *testing.T) {
 	t.Setenv("NFEIO_API_KEY", "k")
-	t.Setenv("NFEIO_WEBHOOK_SECRET", "s")
+	t.Setenv("NFEIO_WEBHOOK_SECRET", "0123456789abcdef0123456789abcdef")
 	os.Unsetenv("NFEIO_BASE_URL")
 	os.Unsetenv("WEBHOOK_PORT")
 	os.Unsetenv("HEALTHCHECK_PORT")
@@ -74,5 +75,21 @@ func TestLoad_DefaultsApplied(t *testing.T) {
 	}
 	if cfg.TemplatesDir != "manifest/templates" {
 		t.Errorf("default TemplatesDir = %q; want manifest/templates", cfg.TemplatesDir)
+	}
+}
+
+func TestLoad_RejectsWebhookSecretOutsideProviderContract(t *testing.T) {
+	for name, secret := range map[string]string{
+		"31 characters":          "1234567890123456789012345678901",
+		"65 characters":          "12345678901234567890123456789012345678901234567890123456789012345",
+		"surrounding whitespace": " 0123456789abcdef0123456789abcdef",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("NFEIO_API_KEY", "k")
+			t.Setenv("NFEIO_WEBHOOK_SECRET", secret)
+			if _, err := Load(); err == nil {
+				t.Fatal("Load() must reject a webhook secret outside the 32 to 64 character contract")
+			}
+		})
 	}
 }

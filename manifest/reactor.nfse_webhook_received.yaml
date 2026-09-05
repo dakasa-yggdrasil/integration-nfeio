@@ -9,8 +9,9 @@ spec:
   idempotent: true
   resource_types: [service_invoice]
   description: >
-    Reactor: receives NFe.io webhook on /webhook/nfeio (HMAC-SHA256
-    via X-Hub-Signature-256), dedupes (LRU(4096) by event id with
+    Legacy normalized-body reactor, not a supported public NFe.io receiver.
+    Receives /webhook/nfeio (HMAC-SHA1
+    via exactly one X-Hub-Signature), dedupes (LRU(4096) by event id with
     body-hash fallback), normalizes status to {issued|cancelled|
     processing_failed}, and publishes via publish_message on the
     rabbitmq-topology instance to enterprise-payments.nfe.{emitted,

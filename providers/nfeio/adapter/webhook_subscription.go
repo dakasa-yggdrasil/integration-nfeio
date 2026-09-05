@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 const (
 	webhookEnvelopeField    = "webHook"
 	webhookInsecureSSLField = "insecureSsl"
+	webhookSecretField      = "secret"
+	webhookHeadersField     = "headers"
 )
 
 // EnsureWebhookSubscriptionInput deliberately supports only reconciliation of
@@ -22,10 +25,13 @@ const (
 // Ref and ConfirmID are destroy-only bridge fields. They live here because the
 // SDK passes the ensure desired type to DestroyWithDesired. Ensure rejects them.
 type EnsureWebhookSubscriptionInput struct {
-	ID          string `json:"id"`
-	InsecureSSL *bool  `json:"insecure_ssl"`
-	Ref         string `json:"ref,omitempty"`
-	ConfirmID   string `json:"confirm_id,omitempty"`
+	ID                         string `json:"id"`
+	InsecureSSL                *bool  `json:"insecure_ssl"`
+	SetHMACFromRuntime         bool   `json:"set_hmac_from_runtime,omitempty"`
+	RemoveLegacyAuthorization  bool   `json:"remove_legacy_authorization,omitempty"`
+	ConfirmSecurityMigrationID string `json:"confirm_security_migration_id,omitempty"`
+	Ref                        string `json:"ref,omitempty"`
+	ConfirmID                  string `json:"confirm_id,omitempty"`
 }
 
 // UnmarshalJSON rejects legacy create-shaped or otherwise unknown desired
@@ -53,6 +59,27 @@ func (in *EnsureWebhookSubscriptionInput) UnmarshalJSON(data []byte) error {
 				return errors.New("webhook_subscription input insecure_ssl must be a boolean")
 			}
 			in.InsecureSSL = &value
+		case "set_hmac_from_runtime":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription security migration flag must be a boolean")
+			}
+			if err := json.Unmarshal(raw, &in.SetHMACFromRuntime); err != nil {
+				return errors.New("webhook_subscription security migration flag must be a boolean")
+			}
+		case "remove_legacy_authorization":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription legacy authorization flag must be a boolean")
+			}
+			if err := json.Unmarshal(raw, &in.RemoveLegacyAuthorization); err != nil {
+				return errors.New("webhook_subscription legacy authorization flag must be a boolean")
+			}
+		case "confirm_security_migration_id":
+			if strings.TrimSpace(string(raw)) == "null" {
+				return errors.New("webhook_subscription security migration confirmation must be a string")
+			}
+			if err := json.Unmarshal(raw, &in.ConfirmSecurityMigrationID); err != nil {
+				return errors.New("webhook_subscription security migration confirmation must be a string")
+			}
 		case "ref":
 			if err := json.Unmarshal(raw, &in.Ref); err != nil {
 				return errors.New("webhook_subscription input ref must be a string")
@@ -130,20 +157,78 @@ func (d webhookDocument) insecureSSL() (bool, bool) {
 	return value, true
 }
 
-func (d webhookDocument) fieldsWithSecureTLS() map[string]json.RawMessage {
+func (d webhookDocument) hasMatchingRuntimeSecret(runtimeHMAC string) bool {
+	raw, ok := d.fields[webhookSecretField]
+	if !ok || !validRuntimeWebhookSecret(runtimeHMAC) {
+		return false
+	}
+	var secret string
+	return json.Unmarshal(raw, &secret) == nil &&
+		validRuntimeWebhookSecret(secret) &&
+		hmac.Equal([]byte(secret), []byte(runtimeHMAC))
+}
+
+func (d webhookDocument) desiredFields(in EnsureWebhookSubscriptionInput, runtimeHMAC string) (map[string]json.RawMessage, error) {
 	fields := make(map[string]json.RawMessage, len(d.fields))
 	for name, raw := range d.fields {
 		fields[name] = append(json.RawMessage(nil), raw...)
 	}
 	fields[webhookInsecureSSLField] = json.RawMessage("false")
-	return fields
+	if !in.SetHMACFromRuntime {
+		return fields, nil
+	}
+
+	encodedHMAC, err := json.Marshal(runtimeHMAC)
+	if err != nil {
+		return nil, errors.New("webhook security migration could not encode the runtime credential")
+	}
+	fields[webhookSecretField] = encodedHMAC
+
+	rawHeaders, ok := fields[webhookHeadersField]
+	if !ok || string(rawHeaders) == "null" {
+		return fields, nil
+	}
+	var headers map[string]json.RawMessage
+	if err := json.Unmarshal(rawHeaders, &headers); err != nil || headers == nil {
+		return nil, errors.New("webhook security migration could not preserve provider headers")
+	}
+	for name := range headers {
+		if strings.EqualFold(name, "Authorization") {
+			delete(headers, name)
+		}
+	}
+	encodedHeaders, err := json.Marshal(headers)
+	if err != nil {
+		return nil, errors.New("webhook security migration could not preserve provider headers")
+	}
+	fields[webhookHeadersField] = encodedHeaders
+	return fields, nil
+}
+
+func (d webhookDocument) hasLegacyAuthorization() (bool, error) {
+	rawHeaders, ok := d.fields[webhookHeadersField]
+	if !ok || string(rawHeaders) == "null" {
+		return false, nil
+	}
+	var headers map[string]json.RawMessage
+	if err := json.Unmarshal(rawHeaders, &headers); err != nil || headers == nil {
+		return false, errors.New("webhook security migration confirmation is invalid")
+	}
+	for name := range headers {
+		if strings.EqualFold(name, "Authorization") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // EnsureWebhookSubscription reconciles one pre-existing webhook by exact ID.
-// The only permitted drift repair is insecureSsl true -> false. It never POSTs,
-// lists, matches by URI, deletes, or mutates any other provider field.
+// The ordinary drift repair changes only insecureSsl true -> false. An explicit
+// exact-ID security migration may additionally copy the already projected
+// runtime HMAC credential into the provider object and remove the legacy static
+// Authorization header. It never POSTs, lists, matches by URI, or deletes.
 func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhookSubscriptionInput) (*EnsureWebhookSubscriptionOutput, error) {
-	if err := validateWebhookEnsureInput(in); err != nil {
+	if err := validateWebhookEnsureInput(in, cli.cfg.WebhookSecret); err != nil {
 		return nil, err
 	}
 
@@ -155,12 +240,19 @@ func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhoo
 	if !ok {
 		return nil, errors.New("ensure_webhook_subscription: provider response omitted a valid insecureSsl field")
 	}
-	if !insecureSSL {
+	if !insecureSSL && !in.SetHMACFromRuntime {
 		return safeWebhookOutput(in.ID, false, false), nil
 	}
+	if insecureSSL && !in.SetHMACFromRuntime && !current.hasMatchingRuntimeSecret(cli.cfg.WebhookSecret) {
+		return nil, errors.New("ensure_webhook_subscription: exact-ID security migration is required before provider update")
+	}
 
+	desired, err := current.desiredFields(in, cli.cfg.WebhookSecret)
+	if err != nil {
+		return nil, err
+	}
 	body := map[string]any{
-		webhookEnvelopeField: current.fieldsWithSecureTLS(),
+		webhookEnvelopeField: desired,
 	}
 	path := webhookExactPath(in.ID)
 	if err := cli.do(ctx, http.MethodPut, path, body, nil); err != nil {
@@ -175,10 +267,19 @@ func EnsureWebhookSubscription(ctx context.Context, cli *Client, in EnsureWebhoo
 	if !ok || confirmedInsecureSSL {
 		return nil, errors.New("ensure_webhook_subscription: secure TLS setting was not confirmed")
 	}
+	if in.SetHMACFromRuntime {
+		hasLegacyAuthorization, err := confirmed.hasLegacyAuthorization()
+		if err != nil {
+			return nil, err
+		}
+		if hasLegacyAuthorization {
+			return nil, errors.New("ensure_webhook_subscription: security migration was not confirmed")
+		}
+	}
 	return safeWebhookOutput(in.ID, false, true), nil
 }
 
-func validateWebhookEnsureInput(in EnsureWebhookSubscriptionInput) error {
+func validateWebhookEnsureInput(in EnsureWebhookSubscriptionInput, runtimeHMAC string) error {
 	if !validWebhookID(in.ID) {
 		return errors.New("ensure_webhook_subscription: valid exact id required")
 	}
@@ -191,7 +292,22 @@ func validateWebhookEnsureInput(in EnsureWebhookSubscriptionInput) error {
 	if *in.InsecureSSL {
 		return errors.New("ensure_webhook_subscription: insecure_ssl=true is forbidden")
 	}
+	migrationRequested := in.SetHMACFromRuntime ||
+		in.RemoveLegacyAuthorization || in.ConfirmSecurityMigrationID != ""
+	if migrationRequested {
+		if !in.SetHMACFromRuntime || !in.RemoveLegacyAuthorization ||
+			in.ConfirmSecurityMigrationID != in.ID {
+			return errors.New("ensure_webhook_subscription: complete exact-ID security migration confirmation is required")
+		}
+		if !validRuntimeWebhookSecret(runtimeHMAC) {
+			return errors.New("ensure_webhook_subscription: runtime security credential is invalid")
+		}
+	}
 	return nil
+}
+
+func validRuntimeWebhookSecret(value string) bool {
+	return len(value) >= 32 && len(value) <= 64 && strings.TrimSpace(value) == value
 }
 
 func safeWebhookOutput(id string, insecureSSL, updated bool) *EnsureWebhookSubscriptionOutput {
@@ -230,7 +346,7 @@ func sanitizeWebhookProviderError(operation string, err error) error {
 }
 
 func validWebhookID(id string) bool {
-	if id == "" || len(id) > 128 || strings.TrimSpace(id) != id {
+	if id == "" || id == "." || id == ".." || len(id) > 128 || strings.TrimSpace(id) != id {
 		return false
 	}
 	for _, char := range id {

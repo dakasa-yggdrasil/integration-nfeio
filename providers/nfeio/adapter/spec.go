@@ -74,7 +74,7 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "3.0.0"
+	AdapterVersion  = "3.1.0"
 
 	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
 	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
@@ -310,7 +310,7 @@ func actionCatalog() []contract.IntegrationActionDefinition {
 		{Name: OpCalculateISS, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceMunicipalityTemplate}, Description: "Pure-function helper: compute ISS tax amount from municipality template and service amount (allowlisted)."},
 		// webhook_subscription exact-ID lifecycle. Provider secrets and raw
 		// configuration never enter observed resources or mutation events.
-		{Name: OpEnsureWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Reconcile a pre-existing NFe.io webhook by exact ID. GET then PUT /v2/webhooks/{id}; only insecureSsl=true to false is mutable, and every other provider field is preserved."},
+		{Name: OpEnsureWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Reconcile a pre-existing NFe.io webhook by exact ID. Ordinary runs only set insecureSsl=false. An explicitly confirmed security migration may also set the provider HMAC from the runtime credential and remove legacy Authorization while preserving every other field."},
 		{Name: OpObserveWebhookSubscriptions, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Read one pre-existing webhook by exact ID (GET /v2/webhooks/{id}); enumeration and attribute-based adoption are disabled."},
 		{Name: OpDestroyWebhookSubscription, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceWebhookSubscription}, Description: "Explicitly destroy one webhook by exact ID only when confirm_id equals id. DELETE /v2/webhooks/{id}; 404 is already-absent success."},
 		// Reactor (NOT exposed via execute; triggered by inbound webhook HTTP server).

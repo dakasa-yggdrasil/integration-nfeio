@@ -244,3 +244,59 @@ func TestE2E_NfeioWebhookSubscriptionEnsureEventNeverExposesProviderSecrets(t *t
 	encodedEvents, _ := json.Marshal(emitter.events)
 	assertSecretFree(t, string(resp)+string(encodedEvents))
 }
+
+func TestE2E_NfeioWebhookSecurityMigrationEventNeverExposesRuntimeHMAC(t *testing.T) {
+	current := webhookProviderObject("wh-1", true)
+	delete(current, webhookSecretField)
+	confirmed := webhookProviderObject("wh-1", false)
+	delete(confirmed, webhookSecretField)
+	delete(confirmed[webhookHeadersField].(map[string]any), "Authorization")
+	var calls int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			writeWebhookResponse(t, w, current)
+		case 2:
+			if r.Method != http.MethodPut {
+				t.Fatalf("migration call 2 method=%s, want PUT", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case 3:
+			writeWebhookResponse(t, w, confirmed)
+		default:
+			t.Fatalf("unexpected provider call %d", calls)
+		}
+	})
+	defer srv.Close()
+
+	emitter := &webhookCaptureEmitter{}
+	a := sdkadapter.New(sdkadapter.Config{Provider: Provider, IntegrationType: IntegrationType})
+	reconcile.RegisterReconciler[webhookSubDesired, webhookSubObserved](
+		a, "webhook_subscription", "webhook_subscriptions",
+		newWebhookSubReconciler(mustNewClientWithWebhookSecret(t, srv.URL, webhookSecretCanary)),
+		reconcile.WithProvider(Provider),
+		reconcile.WithEmitter(emitter),
+		reconcile.WithInstanceID("nfeio-dakasa-production"),
+	)
+
+	body, _ := json.Marshal(map[string]any{
+		"operation": "ensure_webhook_subscription",
+		"input": map[string]any{
+			"id":                            "wh-1",
+			"insecure_ssl":                  false,
+			"set_hmac_from_runtime":         true,
+			"remove_legacy_authorization":   true,
+			"confirm_security_migration_id": "wh-1",
+		},
+	})
+	resp, _, err := reconcile.ExecuteForTest(context.Background(), a, rpc.Delivery{Body: body})
+	if err != nil {
+		t.Fatalf("security migration dispatch failed: %v", err)
+	}
+	if calls != 3 || len(emitter.events) != 1 {
+		t.Fatalf("provider calls=%d mutation events=%d; want 3 and 1", calls, len(emitter.events))
+	}
+	encodedEvents, _ := json.Marshal(emitter.events)
+	assertSecretFree(t, string(resp)+string(encodedEvents))
+}

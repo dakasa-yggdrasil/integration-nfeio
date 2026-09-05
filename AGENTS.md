@@ -15,7 +15,7 @@ listener** that republishes NFe.io status callbacks to `enterprise-payments.*`.
 The adapter's real contract is whatever **`Describe()` returns** in
 `providers/nfeio/adapter/spec.go`. Read it before changing anything; it owns the
 capability list, resource types, credential/instance schemas, transport, and
-version (`AdapterVersion = "3.0.0"`). `CLAUDE.md` has the full map. If a doc
+version (`AdapterVersion = "3.1.0"`). `CLAUDE.md` has the full map. If a doc
 disagrees with `spec.go`, `spec.go` wins.
 
 ## Capabilities
@@ -51,7 +51,8 @@ were removed at v3.0.0. Don't add new `create_/list_/delete_/update_` names.
 - Health on `:8080` (`/healthz`, `/readyz`, `/metrics`); webhook on `:8082`
   (`/webhook/nfeio`).
 - Required creds: `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET` (`config.Load()` exits
-  if either is empty).
+  if the API key is empty or the HMAC is not 32 to 64 characters without
+  surrounding whitespace).
 
 ## Manifest synchronization
 

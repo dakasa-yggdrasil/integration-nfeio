@@ -18,6 +18,7 @@ import (
 const (
 	webhookSecretCanary = "CANARY_WEBHOOK_SECRET_DO_NOT_LEAK"
 	headerSecretCanary  = "CANARY_AUTHORIZATION_DO_NOT_LEAK"
+	headerCaseCanary    = "SECOND_LEGACY_VALUE_DO_NOT_LEAK"
 	propertyCanary      = "CANARY_PROPERTY_DO_NOT_LEAK"
 )
 
@@ -29,6 +30,20 @@ func falsePointer() *bool {
 func truePointer() *bool {
 	value := true
 	return &value
+}
+
+func mustNewClientWithWebhookSecret(t *testing.T, baseURL, secret string) *Client {
+	t.Helper()
+	cli, err := NewClient(&config.Config{
+		APIKey:        "key123",
+		WebhookSecret: secret,
+		CompanyID:     "cmpDefault",
+		BaseURL:       baseURL,
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewClient err = %v", err)
+	}
+	return cli
 }
 
 func webhookProviderObject(id string, insecureSSL bool) map[string]any {
@@ -72,6 +87,7 @@ func assertSecretFree(t *testing.T, value string) {
 	for _, forbidden := range []string{
 		webhookSecretCanary,
 		headerSecretCanary,
+		headerCaseCanary,
 		propertyCanary,
 		`"secret"`,
 		`"headers"`,
@@ -96,7 +112,7 @@ func TestEnsureWebhookSubscription_ExactIDNoopNeverMutates(t *testing.T) {
 	})
 	defer srv.Close()
 
-	out, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+	out, err := EnsureWebhookSubscription(context.Background(), mustNewClientWithWebhookSecret(t, srv.URL, webhookSecretCanary), EnsureWebhookSubscriptionInput{
 		ID:          "wh-1",
 		InsecureSSL: falsePointer(),
 	})
@@ -155,7 +171,7 @@ func TestEnsureWebhookSubscription_ExactIDUpdatePreservesEveryExistingField(t *t
 	})
 	defer srv.Close()
 
-	out, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+	out, err := EnsureWebhookSubscription(context.Background(), mustNewClientWithWebhookSecret(t, srv.URL, webhookSecretCanary), EnsureWebhookSubscriptionInput{
 		ID:          "wh-1",
 		InsecureSSL: falsePointer(),
 	})
@@ -170,6 +186,202 @@ func TestEnsureWebhookSubscription_ExactIDUpdatePreservesEveryExistingField(t *t
 	}
 	encoded, _ := json.Marshal(out)
 	assertSecretFree(t, string(encoded))
+}
+
+func TestEnsureWebhookSubscription_ExactIDSecurityMigrationUsesRuntimeHMACAndRemovesLegacyAuthorization(t *testing.T) {
+	original := webhookProviderObject("wh-1", true)
+	delete(original, webhookSecretField)
+	originalHeaders := original[webhookHeadersField].(map[string]any)
+	originalHeaders["authorization"] = headerCaseCanary
+
+	expectedPut := webhookProviderObject("wh-1", false)
+	expectedHeaders := expectedPut[webhookHeadersField].(map[string]any)
+	delete(expectedHeaders, "Authorization")
+
+	confirmed := webhookProviderObject("wh-1", false)
+	delete(confirmed, webhookSecretField)
+	confirmedHeaders := confirmed[webhookHeadersField].(map[string]any)
+	delete(confirmedHeaders, "Authorization")
+
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		if r.URL.Path != "/v2/webhooks/wh-1" {
+			t.Fatalf("call %d path = %s; want exact ID path", call, r.URL.Path)
+		}
+		switch call {
+		case 1:
+			if r.Method != http.MethodGet {
+				t.Fatalf("call 1 method = %s; want GET", r.Method)
+			}
+			writeWebhookResponse(t, w, original)
+		case 2:
+			if r.Method != http.MethodPut {
+				t.Fatalf("call 2 method = %s; want PUT", r.Method)
+			}
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode PUT body: %v", err)
+			}
+			got := body[webhookEnvelopeField]
+			if !reflect.DeepEqual(got, expectedPut) {
+				gotJSON, _ := json.Marshal(got)
+				wantJSON, _ := json.Marshal(expectedPut)
+				t.Fatalf("security migration changed an unapproved field\ngot:  %s\nwant: %s", gotJSON, wantJSON)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case 3:
+			if r.Method != http.MethodGet {
+				t.Fatalf("call 3 method = %s; want confirmation GET", r.Method)
+			}
+			writeWebhookResponse(t, w, confirmed)
+		default:
+			t.Fatalf("unexpected provider call %d: %s %s", call, r.Method, r.URL.Path)
+		}
+	})
+	defer srv.Close()
+
+	cli, err := NewClient(&config.Config{
+		APIKey:        "key123",
+		WebhookSecret: webhookSecretCanary,
+		CompanyID:     "cmpDefault",
+		BaseURL:       srv.URL,
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := EnsureWebhookSubscription(context.Background(), cli, EnsureWebhookSubscriptionInput{
+		ID:                         "wh-1",
+		InsecureSSL:                falsePointer(),
+		SetHMACFromRuntime:         true,
+		RemoveLegacyAuthorization:  true,
+		ConfirmSecurityMigrationID: "wh-1",
+	})
+	if err != nil {
+		t.Fatalf("EnsureWebhookSubscription err = %v", err)
+	}
+	if calls != 3 || !out.Adopted || !out.Updated || out.InsecureSSL {
+		t.Fatalf("unexpected migration result: calls=%d out=%+v", calls, out)
+	}
+	encoded, _ := json.Marshal(out)
+	assertSecretFree(t, string(encoded))
+}
+
+func TestEnsureWebhookSubscription_SecurityMigrationReplayProducesIdenticalPUT(t *testing.T) {
+	current := webhookProviderObject("wh-1", false)
+	delete(current, webhookSecretField)
+	delete(current[webhookHeadersField].(map[string]any), "Authorization")
+	var calls int32
+	var puts []map[string]any
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		switch call % 3 {
+		case 1, 0:
+			if r.Method != http.MethodGet {
+				t.Fatalf("call %d method = %s; want GET", call, r.Method)
+			}
+			writeWebhookResponse(t, w, current)
+		case 2:
+			if r.Method != http.MethodPut {
+				t.Fatalf("call %d method = %s; want PUT", call, r.Method)
+			}
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode replay PUT: %v", err)
+			}
+			puts = append(puts, body[webhookEnvelopeField])
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	defer srv.Close()
+
+	cli := mustNewClientWithWebhookSecret(t, srv.URL, webhookSecretCanary)
+	in := EnsureWebhookSubscriptionInput{
+		ID:                         "wh-1",
+		InsecureSSL:                falsePointer(),
+		SetHMACFromRuntime:         true,
+		RemoveLegacyAuthorization:  true,
+		ConfirmSecurityMigrationID: "wh-1",
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := EnsureWebhookSubscription(context.Background(), cli, in); err != nil {
+			t.Fatalf("migration replay attempt %d: %v", attempt+1, err)
+		}
+	}
+	if calls != 6 || len(puts) != 2 {
+		t.Fatalf("migration replay calls=%d puts=%d; want two GET/PUT/GET cycles", calls, len(puts))
+	}
+	if !reflect.DeepEqual(puts[0], puts[1]) {
+		t.Fatal("migration replay changed the semantic PUT body")
+	}
+}
+
+func TestEnsureWebhookSubscription_SecurityMigrationFailsWhenLegacyAuthorizationSurvives(t *testing.T) {
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		switch call {
+		case 1:
+			writeWebhookResponse(t, w, webhookProviderObject("wh-1", true))
+		case 2:
+			w.WriteHeader(http.StatusNoContent)
+		case 3:
+			writeWebhookResponse(t, w, webhookProviderObject("wh-1", false))
+		default:
+			t.Fatalf("unexpected provider call %d", call)
+		}
+	})
+	defer srv.Close()
+
+	cli, err := NewClient(&config.Config{
+		APIKey:        "key123",
+		WebhookSecret: webhookSecretCanary,
+		CompanyID:     "cmpDefault",
+		BaseURL:       srv.URL,
+	}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = EnsureWebhookSubscription(context.Background(), cli, EnsureWebhookSubscriptionInput{
+		ID:                         "wh-1",
+		InsecureSSL:                falsePointer(),
+		SetHMACFromRuntime:         true,
+		RemoveLegacyAuthorization:  true,
+		ConfirmSecurityMigrationID: "wh-1",
+	})
+	if err == nil {
+		t.Fatal("migration must fail when the provider keeps legacy Authorization")
+	}
+	if calls != 3 {
+		t.Fatalf("provider calls = %d; want GET, PUT, GET", calls)
+	}
+	assertSecretFree(t, err.Error())
+}
+
+func TestEnsureWebhookSubscription_OrdinaryDriftWithoutProviderSecretFailsBeforePUT(t *testing.T) {
+	original := webhookProviderObject("wh-1", true)
+	delete(original, webhookSecretField)
+	var calls int32
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		if call != 1 || r.Method != http.MethodGet {
+			t.Fatalf("ordinary reconciliation without a preservable secret must stop after GET, call=%d method=%s", call, r.Method)
+		}
+		writeWebhookResponse(t, w, original)
+	})
+	defer srv.Close()
+
+	_, err := EnsureWebhookSubscription(context.Background(), mustNewClient(t, srv.URL), EnsureWebhookSubscriptionInput{
+		ID:          "wh-1",
+		InsecureSSL: falsePointer(),
+	})
+	if err == nil {
+		t.Fatal("ordinary provider update must require the explicit security migration when GET omits secret")
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d; want one GET and zero PUTs", calls)
+	}
+	assertSecretFree(t, err.Error())
 }
 
 func TestEnsureWebhookSubscription_RejectsCreateShapeBeforeProviderCall(t *testing.T) {
@@ -191,6 +403,30 @@ func TestEnsureWebhookSubscription_RejectsCreateShapeBeforeProviderCall(t *testi
 	assertSecretFree(t, err.Error())
 }
 
+func TestEnsureWebhookSubscription_RejectsNullMigrationFieldsBeforeProviderCall(t *testing.T) {
+	inputs := []string{
+		`{"id":"wh-1","insecure_ssl":false,"set_hmac_from_runtime":null}`,
+		`{"id":"wh-1","insecure_ssl":false,"remove_legacy_authorization":null}`,
+		`{"id":"wh-1","insecure_ssl":false,"confirm_security_migration_id":null}`,
+	}
+	for _, input := range inputs {
+		var calls int32
+		srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+		})
+		payload := []byte(`{"operation":"ensure_webhook_subscription","input":` + input + `}`)
+		_, err := executeRoute(context.Background(), mustNewClient(t, srv.URL), nil, nil, payload)
+		srv.Close()
+		if err == nil {
+			t.Fatalf("null migration field must fail: %s", input)
+		}
+		if calls != 0 {
+			t.Fatalf("null migration field made %d provider calls", calls)
+		}
+		assertSecretFree(t, err.Error())
+	}
+}
+
 func TestEnsureWebhookSubscription_RejectsUnsafeDesiredStateBeforeProviderCall(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -200,6 +436,12 @@ func TestEnsureWebhookSubscription_RejectsUnsafeDesiredStateBeforeProviderCall(t
 		{name: "missing desired field", input: EnsureWebhookSubscriptionInput{ID: "wh-1"}},
 		{name: "allows only false", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: truePointer()}},
 		{name: "path injection", input: EnsureWebhookSubscriptionInput{ID: "../webhooks", InsecureSSL: falsePointer()}},
+		{name: "current dot segment", input: EnsureWebhookSubscriptionInput{ID: ".", InsecureSSL: falsePointer()}},
+		{name: "parent dot segment", input: EnsureWebhookSubscriptionInput{ID: "..", InsecureSSL: falsePointer()}},
+		{name: "partial HMAC request", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: falsePointer(), SetHMACFromRuntime: true}},
+		{name: "partial legacy removal", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: falsePointer(), RemoveLegacyAuthorization: true}},
+		{name: "mismatched security confirmation", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: falsePointer(), SetHMACFromRuntime: true, RemoveLegacyAuthorization: true, ConfirmSecurityMigrationID: "wh-other"}},
+		{name: "invalid runtime HMAC", input: EnsureWebhookSubscriptionInput{ID: "wh-1", InsecureSSL: falsePointer(), SetHMACFromRuntime: true, RemoveLegacyAuthorization: true, ConfirmSecurityMigrationID: "wh-1"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -258,7 +500,7 @@ func TestEnsureWebhookSubscription_SanitizesProviderErrorAndLogs(t *testing.T) {
 	defer srv.Close()
 	cli, err := NewClient(&config.Config{
 		APIKey:        "key123",
-		WebhookSecret: "ws",
+		WebhookSecret: webhookSecretCanary,
 		CompanyID:     "cmpDefault",
 		BaseURL:       srv.URL,
 	}, logger)

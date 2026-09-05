@@ -34,7 +34,7 @@ Run the worker locally (HTTP transport is the default):
 
 ```bash
 NFEIO_API_KEY=sk_test_xxx \
-NFEIO_WEBHOOK_SECRET=whsec_xxx \
+NFEIO_WEBHOOK_SECRET=replace_with_32_char_secret_here \
 TEMPLATES_DIR=manifest/templates \
 go run ./cmd/adapter
 ```
@@ -129,6 +129,6 @@ docs in the same change.
 |---|---|
 | Go | 1.25 |
 | `yggdrasil-sdk-go` | v0.8.3 |
-| Adapter version (`Describe()`) | 3.0.0 |
+| Adapter version (`Describe()`) | 3.1.0 |
 | Transports | `http_json` (default), `amqp` |
 </content>

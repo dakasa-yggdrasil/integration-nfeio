@@ -2,17 +2,18 @@ package adapter
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"go.uber.org/zap"
-
-	sdkwebhook "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/webhookhttp"
 
 	"github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/config"
 )
@@ -95,11 +96,7 @@ func (s *WebhookServer) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sig := r.Header.Get("X-Hub-Signature-256")
-	if sig == "" {
-		sig = r.Header.Get("X-Hub-Signature")
-	}
-	if err := sdkwebhook.VerifyHMACSHA256Header(body, sig, []byte(s.cfg.WebhookSecret)); err != nil {
+	if !verifyNFeIOSignature(r.Header, body, s.cfg.WebhookSecret) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
 	}
@@ -141,6 +138,49 @@ func (s *WebhookServer) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// verifyNFeIOSignature mirrors the provider wire contract and the Payments
+// receiver: exactly one X-Hub-Signature value containing sha1=<40 hex> over
+// the exact request bytes. The obsolete SHA-256 header is rejected so callers
+// cannot accidentally authenticate with a contract NFe.io does not emit.
+func verifyNFeIOSignature(headers http.Header, body []byte, secret string) bool {
+	if !validRuntimeWebhookSecret(secret) {
+		return false
+	}
+	if _, present := singleHTTPHeader(headers, "X-Hub-Signature-256"); present {
+		return false
+	}
+	signature, present := singleHTTPHeader(headers, "X-Hub-Signature")
+	if !present || !strings.HasPrefix(signature, "sha1=") {
+		return false
+	}
+	digest, err := hex.DecodeString(strings.TrimPrefix(signature, "sha1="))
+	if err != nil || len(digest) != sha1.Size {
+		return false
+	}
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return hmac.Equal(digest, mac.Sum(nil))
+}
+
+func singleHTTPHeader(headers http.Header, name string) (string, bool) {
+	var values []string
+	found := false
+	for key, candidates := range headers {
+		if strings.EqualFold(key, name) {
+			found = true
+			values = append(values, candidates...)
+		}
+	}
+	if len(values) != 1 {
+		return "", found
+	}
+	value := strings.TrimSpace(values[0])
+	if value == "" || strings.Contains(value, ",") {
+		return "", true
+	}
+	return value, true
 }
 
 // normalizeNfeEvent collapses NFe.io's polymorphic event vocabulary to

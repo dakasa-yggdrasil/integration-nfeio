@@ -21,9 +21,8 @@ Issue, observe, cancel and reconcile NFSe service invoices through a declarative
 service invoices (NFSe) declaratively. It speaks the standard adapter `describe` /
 `execute` contract over HTTP-JSON, exposes 14 callable capabilities across five
 resource types (service invoices, companies, municipalities, município templates,
-webhook subscriptions), and runs a dedicated webhook listener that turns inbound
-NFe.io status callbacks into `enterprise-payments.nfe.*` queue messages via the
-`nfse_webhook_received` reactor.
+webhook subscriptions), plus a legacy normalized-body reactor that must not be
+used as the public NFe.io receiver.
 
 > **Where this fits in Yggdrasil** — Yggdrasil is a self-hosted control plane for
 > declarative workflows + integrations over your whole stack (think *Backstage, but
@@ -39,10 +38,11 @@ flowchart LR
   core["yggdrasil-core<br/>(catalog · RBAC · workflows)"]
   adapter["integration-nfeio<br/>(this adapter)"]
   nfeio["NFe.io REST API<br/>api.nfe.io /v2"]
+  payments["application webhook receiver<br/>(DaKasa: Payments)"]
 
   core -- "HTTP-JSON<br/>/rpc/describe · /rpc/execute" --> adapter
   adapter -- "REST + API key" --> nfeio
-  nfeio -. "HMAC webhook<br/>/webhook/nfeio" .-> adapter
+  nfeio -. "production signed webhook" .-> payments
   adapter -- "publish_message → rabbitmq-topology" --> core
 ```
 
@@ -83,10 +83,10 @@ schemas in [docs/CAPABILITIES.md](./docs/CAPABILITIES.md).
 | `observe_municipalities` | `municipality` | List NFe.io municipalities (cached 1h) |
 | `manage_template` | `municipality_template` | Read-only `get` / `list` / `validate` on bundled templates |
 | `calculate_iss` | `municipality_template` | Pure-function ISS tax computation (no network) |
-| `ensure_webhook_subscription` | `webhook_subscription` | Exact-ID GET/PUT; may only set `insecureSsl=false` |
+| `ensure_webhook_subscription` | `webhook_subscription` | Exact-ID GET/PUT; secures TLS and supports an explicitly confirmed HMAC migration |
 | `observe_webhook_subscriptions` | `webhook_subscription` | Read one exact `{id}`; no enumeration |
 | `destroy_webhook_subscription` | `webhook_subscription` | Exact-ID delete with matching `confirm_id`; 404 is success |
-| `nfse_webhook_received` *(reactor)* | `service_invoice` | Inbound NFe.io webhook → normalize → publish to `enterprise-payments.nfe.*` |
+| `nfse_webhook_received` *(legacy reactor)* | `service_invoice` | Pre-normalized compatibility body only; keep unexposed from NFe.io |
 
 > Capability names follow the Yggdrasil `ensure_/observe_/destroy_` convention.
 > The pre-v2.0.0 compatibility aliases were removed at the v3.0.0 major boundary.
@@ -104,7 +104,7 @@ docker build -t integration-nfeio:dev .
 # 2. Run — HTTP-JSON transport is the default
 docker run --rm \
   -e NFEIO_API_KEY=sk_live_xxx \
-  -e NFEIO_WEBHOOK_SECRET=whsec_xxx \
+  -e NFEIO_WEBHOOK_SECRET=replace_with_32_char_secret_here \
   -p 8080:8080 -p 8081:8081 -p 8082:8082 \
   integration-nfeio:dev
 
@@ -118,13 +118,14 @@ Register it with `yggdrasil-core` by applying the manifests under `manifest/`
 
 ## Configuration
 
-Two mandatory secrets; the rest have safe defaults. Full table in
+Two mandatory secrets; the webhook HMAC must contain 32 to 64 characters with
+no surrounding whitespace. The rest have safe defaults. Full table in
 [docs/CONFIGURATION.md](./docs/CONFIGURATION.md).
 
 | Env var | Required | Secret | Default | Purpose |
 |---|:---:|:---:|---|---|
 | `NFEIO_API_KEY` | yes | yes | — | NFe.io REST API key |
-| `NFEIO_WEBHOOK_SECRET` | yes | yes | — | HMAC-SHA256 secret for inbound webhooks |
+| `NFEIO_WEBHOOK_SECRET` | yes | yes | - | HMAC-SHA1 secret for inbound webhooks |
 | `NFEIO_BASE_URL` | no | no | `https://api.nfe.io` | NFe.io API base URL |
 | `NFEIO_COMPANY_ID` | no | no | _(empty)_ | Default company; per-call override allowed |
 | `YGGDRASIL_TRANSPORT` | no | no | `http_json` | `http_json` (default) or `amqp` |
@@ -154,22 +155,28 @@ Full end-to-end journey (install → configure → first run → verify) in
 
 ## Webhooks & reactors
 
-NFe.io POSTs status callbacks to the adapter's webhook listener (port `8082`,
-path `/webhook/nfeio`). The `nfse_webhook_received` reactor HMAC-verifies the body
-(`X-Hub-Signature-256`), dedupes (LRU, 4096 entries), normalizes the event to
+> **Not a production NFe.io receiver.** This adapter-local listener still expects
+> the legacy normalized `id` / `event` body and does not implement NFe.io's
+> current `X-Hook-Id`, `X-Hook-Event`, and signed `payload` state contract. Keep
+> port `8082` unexposed. DaKasa production terminates NFe.io callbacks in the
+> Payments service.
+
+For legacy normalized callbacks, the adapter's listener (port `8082`, path
+`/webhook/nfeio`) HMAC-verifies the body
+(`X-Hub-Signature: sha1=<40 hex>`), dedupes (LRU, 4096 entries), normalizes the event to
 `{issued | cancelled | processing_failed}`, and publishes to the matching
 `enterprise-payments.nfe.*` queue via the `publish_message` capability on the
 `rabbitmq-topology` instance.
 
 ```mermaid
 sequenceDiagram
-  participant NFe as NFe.io
+  participant NFe as Legacy normalized sender
   participant WH as Webhook server :8082<br/>/webhook/nfeio
   participant RX as nfse_webhook_received<br/>(reactor)
   participant Core as yggdrasil-core<br/>/api/v1/capabilities/invoke
   participant Q as enterprise-payments.nfe.*.q
 
-  NFe->>WH: POST /webhook/nfeio (X-Hub-Signature-256)
+  NFe->>WH: POST /webhook/nfeio (X-Hub-Signature: sha1=...)
   WH->>RX: verify HMAC · LRU dedup · normalize event
   alt duplicate
     RX-->>NFe: 200 {"status":"duplicate"}
@@ -210,7 +217,7 @@ Repo layout, the describe/execute contract, and `pkg/contractcheck` are covered 
 
 - Go **1.25**.
 - `yggdrasil-sdk-go` **v0.8.3** (`adapter`, `webhookhttp`, `sdk/reconcile`, `sdk/events`).
-- Adapter version reported by `Describe()`: **3.0.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
+- Adapter version reported by `Describe()`: **3.1.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
 - Transport: HTTP-JSON (default) or AMQP, selected by `YGGDRASIL_TRANSPORT`.
 
 ## License
