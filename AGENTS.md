@@ -15,7 +15,7 @@ listener** that republishes NFe.io status callbacks to `enterprise-payments.*`.
 The adapter's real contract is whatever **`Describe()` returns** in
 `providers/nfeio/adapter/spec.go`. Read it before changing anything; it owns the
 capability list, resource types, credential/instance schemas, transport, and
-version (`AdapterVersion = "3.1.1"`). `CLAUDE.md` has the full map. If a doc
+version (`AdapterVersion = "3.1.2"`). `CLAUDE.md` has the full map. If a doc
 disagrees with `spec.go`, `spec.go` wins.
 
 ## Capabilities

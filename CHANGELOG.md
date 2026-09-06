@@ -1,5 +1,17 @@
 # Changelog
 
+## v3.1.2 - 2026-09-06
+
+### Fixed
+
+- Changed the `Describe()` credential schema keys from the runtime environment
+  names `NFEIO_API_KEY` and `NFEIO_WEBHOOK_SECRET` to the canonical manifest
+  keys `nfeio_api_key` and `nfeio_webhook_secret`. This makes every required
+  key exist exactly in `credential_schema.properties`, allowing Yggdrasil Core
+  to accept the live describe handshake.
+- Runtime loading is unchanged: `config.Load()` still reads the uppercase
+  `NFEIO_*` environment variables projected into the adapter container.
+
 ## v3.1.1 - 2026-09-05
 
 ### Fixed

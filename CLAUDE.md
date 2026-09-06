@@ -37,7 +37,7 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
 ## Transport & version
 
-- **`AdapterVersion = "3.1.1"`** (in `spec.go`; also the default for the
+- **`AdapterVersion = "3.1.2"`** (in `spec.go`; also the default for the
   link-time-overridable `main.Version`).
 - **Default transport is `http_json`** — RPC served on **port 8081**
   (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
@@ -122,8 +122,10 @@ Key files in `providers/nfeio/adapter/`:
 
 From `Describe()` / `config.go`:
 
-- **Credentials (required):** `NFEIO_API_KEY` (REST auth), `NFEIO_WEBHOOK_SECRET`
-  (provider migration and legacy-listener HMAC). Both are secret/sensitive.
+- **Credentials (required):** the `Describe()` contract uses canonical keys
+  `nfeio_api_key` (REST auth) and `nfeio_webhook_secret` (provider migration
+  and legacy-listener HMAC). The runtime binds them to `NFEIO_API_KEY` and
+  `NFEIO_WEBHOOK_SECRET`; both remain secret/sensitive.
   `config.Load()` fails fast if the API key is empty or the HMAC is not 32 to
   64 characters without surrounding whitespace.
 - **Instance schema:** `environment` enum `production` | `sandbox` (default
@@ -164,10 +166,10 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
 ## Manifest ↔ `spec.go`
 
 `manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
-is currently **in sync** with `spec.go` (version `3.1.1`, no `register_company`
+is currently **in sync** with `spec.go` (version `3.1.2`, no `register_company`
 default action, `thirdparty.nfeio.municipality_template` prefix,
-`.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, upper-case
-credential keys, `environment` enum). **`Describe()` is authoritative; do not
+`.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, canonical
+lower-case credential keys, `environment` enum). **`Describe()` is authoritative; do not
 "fix" the code to match the manifest** — re-derive the manifest from `Describe()`
 instead. No describe-dump tool exists here, so when the contract changes,
 hand-sync the snapshot in the same change and run the lint/spec gates.

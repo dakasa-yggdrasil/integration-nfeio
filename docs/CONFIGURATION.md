@@ -13,13 +13,14 @@ Advertised by `Describe()` with `mode: inline`. Both fields are **required** and
 **secret**. `yggdrasil-core` resolves them per-instance (e.g. from a secret store)
 and injects them into the worker's environment as the env vars below.
 
-| Field / env var | Type | Required | Secret | Purpose |
-|---|---|:---:|:---:|---|
-| `NFEIO_API_KEY` | string | yes | yes | NFe.io REST API key (NFe.io → Settings → API). Authenticates every `/v2` call. |
-| `NFEIO_WEBHOOK_SECRET` | string | yes | yes | 32 to 64 character HMAC-SHA1 secret. It verifies inbound `/webhook/nfeio` callbacks and is the runtime-only source for an explicitly confirmed provider security migration. |
+| Contract field | Runtime env var | Type | Required | Secret | Purpose |
+|---|---|---|:---:|:---:|---|
+| `nfeio_api_key` | `NFEIO_API_KEY` | string | yes | yes | NFe.io REST API key (NFe.io → Settings → API). Authenticates every `/v2` call. |
+| `nfeio_webhook_secret` | `NFEIO_WEBHOOK_SECRET` | string | yes | yes | 32 to 64 character HMAC-SHA1 secret. It verifies inbound `/webhook/nfeio` callbacks and is the runtime-only source for an explicitly confirmed provider security migration. |
 
 > The manifest (`manifest/integration_type.nfeio.yaml`), wire `Describe()`
-> contract, and worker environment all use the upper-case `NFEIO_*` names.
+> contract, and integration instance use canonical lower-case keys. Deployment
+> wiring maps those keys to the worker's unchanged upper-case `NFEIO_*` environment variables.
 
 ## Instance schema
 
