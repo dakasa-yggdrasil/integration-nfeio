@@ -8,10 +8,16 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-ARG VERSION="dev"
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG VERSION
+RUN source_version="$(./scripts/adapter-version.sh)" && \
+    resolved_version="${VERSION:-${source_version}}" && \
+    if [ "${resolved_version}" != "${source_version}" ]; then \
+      echo "VERSION ${resolved_version} does not match AdapterVersion ${source_version}" >&2; \
+      exit 1; \
+    fi && \
+    CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags="-s -w -X main.Version=${VERSION}" \
+    -ldflags="-s -w -X github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/adapter.AdapterVersion=${resolved_version}" \
     -o /out/adapter ./cmd/adapter
 
 FROM gcr.io/distroless/base-debian12:nonroot AS runtime

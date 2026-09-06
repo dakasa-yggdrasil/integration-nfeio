@@ -32,5 +32,112 @@ jobs:
       - name: Test
         run: go test ./... -count=1 -timeout 5m
 
+      - name: Verify linked Describe version
+        env:
+          SENTINEL_VERSION: 0.0.0-ci-link-test
+          NFEIO_API_KEY: ci
+          NFEIO_WEBHOOK_SECRET: 0123456789abcdef0123456789abcdef
+          RPC_PORT: 18081
+          HEALTHCHECK_PORT: 18080
+          WEBHOOK_PORT: 18082
+        run: |
+          test "$SENTINEL_VERSION" != "$(./scripts/adapter-version.sh)"
+
+          adapter_binary="$RUNNER_TEMP/integration-nfeio-version-check"
+          adapter_log="$RUNNER_TEMP/integration-nfeio-version-check.log"
+          go build -trimpath \
+            -ldflags="-s -w -X github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/adapter.AdapterVersion=${SENTINEL_VERSION}" \
+            -o "$adapter_binary" ./cmd/adapter
+
+          cleanup() {
+            if [[ -n "${adapter_pid:-}" ]]; then
+              kill "$adapter_pid" >/dev/null 2>&1 || true
+              wait "$adapter_pid" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          "$adapter_binary" >"$adapter_log" 2>&1 &
+          adapter_pid=$!
+
+          response=""
+          for _ in {1..30}; do
+            response="$(curl --fail --silent --request POST \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              "http://127.0.0.1:${RPC_PORT}/rpc/describe" 2>/dev/null || true)"
+            if [[ -n "$response" ]]; then
+              break
+            fi
+            if ! kill -0 "$adapter_pid" 2>/dev/null; then
+              cat "$adapter_log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [[ -z "$response" ]]; then
+            cat "$adapter_log"
+            exit 1
+          fi
+
+          described_version="$(
+            jq --exit-status --raw-output '.body | @base64d | fromjson | .adapter.version' \
+              <<<"$response"
+          )"
+          test "$described_version" = "$SENTINEL_VERSION"
+
+      - name: Resolve adapter version
+        id: adapter_version
+        run: echo "value=$(./scripts/adapter-version.sh)" >> "$GITHUB_OUTPUT"
+
       - name: Build image
-        run: docker build -t integration-nfeio:ci .
+        run: >-
+          docker build
+          --build-arg VERSION=${{ steps.adapter_version.outputs.value }}
+          -t integration-nfeio:ci .
+
+      - name: Verify built adapter version
+        env:
+          EXPECTED_VERSION: ${{ steps.adapter_version.outputs.value }}
+        run: |
+          reported_version="$(docker run --rm integration-nfeio:ci --version)"
+          test "$reported_version" != "dev"
+          test "$reported_version" = "$EXPECTED_VERSION"
+
+          container_name="integration-nfeio-version-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach --name "$container_name" \
+            --env NFEIO_API_KEY=ci \
+            --env NFEIO_WEBHOOK_SECRET=0123456789abcdef0123456789abcdef \
+            --publish 127.0.0.1::8081 \
+            integration-nfeio:ci
+
+          rpc_address="$(docker port "$container_name" 8081/tcp)"
+          response=""
+          for _ in {1..30}; do
+            response="$(curl --fail --silent --request POST \
+              --header 'Content-Type: application/json' \
+              --data '{}' \
+              "http://${rpc_address}/rpc/describe" 2>/dev/null || true)"
+            if [[ -n "$response" ]]; then
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ -z "$response" ]]; then
+            docker logs "$container_name"
+            exit 1
+          fi
+
+          described_version="$(
+            jq --exit-status --raw-output '.body | @base64d | fromjson | .adapter.version' \
+              <<<"$response"
+          )"
+          test "$described_version" != "dev"
+          test "$described_version" = "$EXPECTED_VERSION"

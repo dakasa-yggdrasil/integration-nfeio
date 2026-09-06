@@ -67,5 +67,5 @@ it as part of unrelated work.
 go test ./...
 go run ./cmd/validate-templates manifest/templates
 go run ./cmd/lint-action-catalog
-docker build --build-arg VERSION=$(git rev-parse --short HEAD) .
+docker build --build-arg VERSION="$(./scripts/adapter-version.sh)" .
 ```

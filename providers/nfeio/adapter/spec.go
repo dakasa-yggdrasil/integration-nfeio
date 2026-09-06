@@ -74,7 +74,6 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "3.1.2"
 
 	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
 	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
@@ -105,6 +104,11 @@ const (
 	ResourceMunicipalityTemplate = "municipality_template"
 	ResourceWebhookSubscription  = "webhook_subscription"
 )
+
+// AdapterVersion is the single source for the version advertised by the
+// running adapter. Release builds override this variable with the same value
+// read from this source file so the image identity and Describe stay aligned.
+var AdapterVersion = "3.1.2"
 
 // SupportedExecuteOperations lists the operations callable via the execute
 // RPC path. The reactor (nfse_webhook_received) is intentionally excluded —
