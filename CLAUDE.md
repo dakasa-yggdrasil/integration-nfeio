@@ -180,7 +180,7 @@ hand-sync the snapshot in the same change and run the lint/spec gates.
 go test ./...
 go run ./cmd/validate-templates manifest/templates   # template-schema gate
 go run ./cmd/lint-action-catalog                      # describe ↔ execute gate
-docker build --build-arg VERSION=$(git rev-parse --short HEAD) .
+docker build --build-arg VERSION="$(./scripts/adapter-version.sh)" .
 ```
 
 CI (`.github/workflows/`): `ci.yml` (test + lint gates), `release.yml`

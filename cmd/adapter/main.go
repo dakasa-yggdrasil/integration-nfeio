@@ -8,9 +8,9 @@
 //     dedupes, normalizes status, publishes to enterprise-payments.* via
 //     the publish_message capability on the rabbitmq-topology instance.
 //
-// The Version variable is overridden at link time by:
+// The adapter package's AdapterVersion is overridden at link time by:
 //
-//	-ldflags="-X main.Version=v1.0.0"
+//	-ldflags="-X github.com/dakasa-yggdrasil/integration-nfeio/providers/nfeio/adapter.AdapterVersion=1.0.0"
 package main
 
 import (
@@ -37,10 +37,12 @@ import (
 //go:embed templates/*.yaml
 var embeddedTemplates embed.FS
 
-// Version is overridden at link time by -X main.Version=vX.Y.Z.
-var Version = ad.AdapterVersion
-
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		_, _ = os.Stdout.WriteString(ad.AdapterVersion + "\n")
+		return
+	}
+
 	logger, err := zap.NewProduction()
 	if err != nil {
 		panic(err)
@@ -83,7 +85,7 @@ func main() {
 	a := sdkadapter.New(sdkadapter.Config{
 		Provider:        ad.Provider,
 		IntegrationType: ad.IntegrationType,
-		Version:         Version,
+		Version:         ad.AdapterVersion,
 		DefaultTimeout:  30 * time.Second,
 		Concurrency:     5,
 	})
