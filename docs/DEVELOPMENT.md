@@ -11,7 +11,7 @@ Back to the [README](../README.md) · contract authority:
 
 - Go **1.25** (`go.mod` declares `go 1.25.0`).
 - Docker (for the image build).
-- `yggdrasil-sdk-go` **v0.8.3** is the SDK pin.
+- `yggdrasil-sdk-go` **v0.9.1** is the SDK pin.
 
 > This repo has **no `Taskfile.yml`**. The `task ...` commands referenced in the older
 > `AGENTS.md` / `CLAUDE.md` do not apply here — use the `go` / `docker` commands below.
@@ -128,7 +128,7 @@ docs in the same change.
 | Component | Pin |
 |---|---|
 | Go | 1.25 |
-| `yggdrasil-sdk-go` | v0.8.3 |
-| Adapter version (`Describe()`) | 3.1.0 |
+| `yggdrasil-sdk-go` | v0.9.1 |
+| Adapter version (`Describe()`) | 3.1.2 |
 | Transports | `http_json` (default), `amqp` |
 </content>

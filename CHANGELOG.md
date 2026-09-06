@@ -1,5 +1,34 @@
 # Changelog
 
+## v3.1.2 - 2026-09-06
+
+### Fixed
+
+- Changed the `Describe()` credential schema keys from the runtime environment
+  names `NFEIO_API_KEY` and `NFEIO_WEBHOOK_SECRET` to the canonical manifest
+  keys `nfeio_api_key` and `nfeio_webhook_secret`. This makes every required
+  key exist exactly in `credential_schema.properties`, allowing Yggdrasil Core
+  to accept the live describe handshake.
+- Runtime loading is unchanged: `config.Load()` still reads the uppercase
+  `NFEIO_*` environment variables projected into the adapter container.
+
+## v3.1.1 - 2026-09-05
+
+### Fixed
+
+- Bumped `yggdrasil-sdk-go` from v0.8.3 to v0.9.1. AMQP startup now
+  passively requires the fixed `describe` and `execute` queues to exist instead
+  of silently creating queues with broker defaults. Permanent access or
+  availability failures during reconnect now make the adapter runtime exit
+  instead of remaining ready with zero consumers.
+
+### Operations
+
+- Import the canonical RabbitMQ definitions before rolling this version. The
+  passive SDK gate fails on missing/inaccessible queues but cannot distinguish
+  classic from quorum; the rollout must verify durable quorum attributes
+  through RabbitMQ management before starting NFe.io.
+
 ## v3.1.0 - 2026-09-05
 
 ### Security

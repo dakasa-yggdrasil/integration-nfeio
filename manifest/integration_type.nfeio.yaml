@@ -12,26 +12,26 @@ spec:
   dashboard:
     url: https://app.nfe.io
     label: "Abrir NFE.io"
-  version: 3.1.0
+  version: 3.1.2
   adapter:
     image_repo: ghcr.io/dakasa-yggdrasil/integration-nfeio
-    image_tag: v3.1.0
+    image_tag: v3.1.2
     transport: http_json
     endpoints:
       describe: /rpc/describe
       execute: /rpc/execute
-    version: 3.1.0
+    version: 3.1.2
     timeout_seconds: 60
   credential_schema:
     mode: inline
     required:
-    - NFEIO_API_KEY
-    - NFEIO_WEBHOOK_SECRET
+    - nfeio_api_key
+    - nfeio_webhook_secret
     properties:
-      NFEIO_API_KEY:
+      nfeio_api_key:
         type: string
         secret: true
-      NFEIO_WEBHOOK_SECRET:
+      nfeio_webhook_secret:
         type: string
         secret: true
   action_catalog:

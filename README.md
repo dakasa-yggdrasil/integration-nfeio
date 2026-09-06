@@ -216,8 +216,8 @@ Repo layout, the describe/execute contract, and `pkg/contractcheck` are covered 
 ## Compatibility
 
 - Go **1.25**.
-- `yggdrasil-sdk-go` **v0.8.3** (`adapter`, `webhookhttp`, `sdk/reconcile`, `sdk/events`).
-- Adapter version reported by `Describe()`: **3.1.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
+- `yggdrasil-sdk-go` **v0.9.1** (`adapter`, `webhookhttp`, `sdk/reconcile`, `sdk/events`).
+- Adapter version reported by `Describe()`: **3.1.2** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
 - Transport: HTTP-JSON (default) or AMQP, selected by `YGGDRASIL_TRANSPORT`.
 
 ## License

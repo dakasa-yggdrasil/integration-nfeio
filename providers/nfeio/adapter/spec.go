@@ -74,7 +74,7 @@ const (
 	// IntegrationType is the per-provider id. SDK uses it to derive the AMQP
 	// queue prefix yggdrasil.adapter.nfeio.{describe,execute}.
 	IntegrationType = "nfeio"
-	AdapterVersion  = "3.1.0"
+	AdapterVersion  = "3.1.2"
 
 	// v2.0.0 canonical capability names (per docs/superpowers/specs/2026-05-27-yggdrasil-integration-capability-convention.md §7).
 	OpEnsureServiceInvoice   = "ensure_service_invoice"   // collapses pre-v2.0.0 issue_nfse
@@ -156,9 +156,9 @@ func Describe() contract.AdapterDescribeResponse {
 		Capabilities: []string{"describe", "execute"},
 		CredentialSchema: contract.IntegrationSchemaSpec{
 			Mode:     "inline",
-			Required: []string{"NFEIO_API_KEY", "NFEIO_WEBHOOK_SECRET"},
+			Required: []string{"nfeio_api_key", "nfeio_webhook_secret"},
 			Properties: map[string]contract.IntegrationSchemaProperty{
-				"NFEIO_API_KEY": {
+				"nfeio_api_key": {
 					Type:        "string",
 					Label:       "NFe.io API key",
 					LabelLocale: map[string]string{"pt-BR": "Chave da API NFe.io", "en-US": "NFe.io API key"},
@@ -178,7 +178,7 @@ func Describe() contract.AdapterDescribeResponse {
 					Sensitive:   true,
 					Secret:      true,
 				},
-				"NFEIO_WEBHOOK_SECRET": {
+				"nfeio_webhook_secret": {
 					Type:        "string",
 					Label:       "Webhook HMAC secret",
 					LabelLocale: map[string]string{"pt-BR": "Segredo HMAC do webhook", "en-US": "Webhook HMAC secret"},
