@@ -13,8 +13,8 @@ func TestSpec_Constants(t *testing.T) {
 	if IntegrationType != "nfeio" {
 		t.Fatalf("IntegrationType = %q; want nfeio", IntegrationType)
 	}
-	if AdapterVersion != "3.1.1" {
-		t.Fatalf("AdapterVersion = %q; want 3.1.1 for passive quorum topology", AdapterVersion)
+	if AdapterVersion != "3.1.2" {
+		t.Fatalf("AdapterVersion = %q; want 3.1.2 for canonical credential schema keys", AdapterVersion)
 	}
 }
 
@@ -183,25 +183,29 @@ func TestSpec_NfeioWebhookSubscriptionResourceType(t *testing.T) {
 	t.Fatal("webhook_subscription resource_type missing")
 }
 
-// TestSpec_CredentialSchemaModeIsInline locks the credential schema
-// mode to "inline" — the only value Yggdrasil core's Phase 1 manifest
-// validator accepts. Pre-v2.2.2 the spec advertised "env" which
-// forced a manual hand-patch on every re-register (caught Phase C
-// 2026-05-27 smoke). The Required env-var names are still declared
-// so downstream tooling knows what to bind from secret stores.
+// TestSpec_CredentialSchemaModeIsInline locks the credential schema to the
+// canonical manifest keys accepted by Yggdrasil Core. Runtime environment
+// variable names are a separate config.Load concern and remain uppercase.
 func TestSpec_CredentialSchemaModeIsInline(t *testing.T) {
 	d := Describe()
 	if got := d.CredentialSchema.Mode; got != "inline" {
 		t.Fatalf("CredentialSchema.Mode = %q; want %q (Yggdrasil core only accepts inline; see Phase 1 validator)", got, "inline")
 	}
-	wantRequired := map[string]bool{"NFEIO_API_KEY": true, "NFEIO_WEBHOOK_SECRET": true}
-	gotRequired := map[string]bool{}
-	for _, k := range d.CredentialSchema.Required {
-		gotRequired[k] = true
+	wantRequired := []string{"nfeio_api_key", "nfeio_webhook_secret"}
+	if len(d.CredentialSchema.Required) != len(wantRequired) {
+		t.Fatalf("CredentialSchema.Required = %v; want %v", d.CredentialSchema.Required, wantRequired)
 	}
-	for k := range wantRequired {
-		if !gotRequired[k] {
-			t.Errorf("CredentialSchema.Required missing %q", k)
+	for index, key := range wantRequired {
+		if got := d.CredentialSchema.Required[index]; got != key {
+			t.Errorf("CredentialSchema.Required[%d] = %q; want %q", index, got, key)
+		}
+		if _, ok := d.CredentialSchema.Properties[key]; !ok {
+			t.Errorf("CredentialSchema required key %q is absent from Properties", key)
+		}
+	}
+	for _, envName := range []string{"NFEIO_API_KEY", "NFEIO_WEBHOOK_SECRET"} {
+		if _, ok := d.CredentialSchema.Properties[envName]; ok {
+			t.Errorf("CredentialSchema.Properties must not expose runtime env name %q", envName)
 		}
 	}
 }
