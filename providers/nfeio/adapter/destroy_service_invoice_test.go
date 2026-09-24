@@ -3,8 +3,10 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/rpc"
@@ -65,6 +67,70 @@ func TestExecuteHandler_DestroyServiceInvoiceDocumentedInput(t *testing.T) {
 				t.Fatalf("event instance_id = %q; want nfeio-dakasa-production", ev.InstanceID)
 			}
 		})
+	}
+}
+
+func TestExecuteHandler_DestroyServiceInvoicePendingCancelIsRetryableAndSilent(t *testing.T) {
+	var calls int
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPut || r.URL.Path != "/v2/companies/cmp-override/serviceinvoices/inv-9/cancel" {
+			t.Errorf("got %s %s; want the cancel PUT", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"status":"WaitingSendCancel","flowMessage":"Aguardando retorno da prefeitura"}`))
+	})
+	defer srv.Close()
+	handler, emitter := newCapturingHandler(t, srv.URL)
+
+	body := coreEnvelope(t, OpDestroyServiceInvoice,
+		map[string]any{"invoice_id": "inv-9", "company_id": "cmp-override"},
+		"nfeio-dakasa-production", "")
+	resp, _, err := handler(context.Background(), rpc.Delivery{Body: body})
+	if err == nil {
+		t.Fatalf("pending cancel returned success %s; want cancellation_pending", resp)
+	}
+	var pending *CancellationPendingError
+	if !errors.As(err, &pending) {
+		t.Fatalf("error = %T %v; want *CancellationPendingError", err, err)
+	}
+	if !pending.Retryable() || pending.Code() != CancellationPendingCode {
+		t.Fatalf("pending error retryable=%v code=%q; want retryable %s", pending.Retryable(), pending.Code(), CancellationPendingCode)
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, CancellationPendingCode+":") {
+		t.Fatalf("error %q does not start with the %s code", msg, CancellationPendingCode)
+	}
+	for _, want := range []string{"inv-9", "WaitingSendCancel", "Aguardando retorno da prefeitura"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not name %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "key123") {
+		t.Fatalf("error %q leaks the NFe.io API key", msg)
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls = %d; want one cancel PUT", calls)
+	}
+	if len(emitter.events) != 0 {
+		t.Fatalf("mutation events = %d; want none while NFe.io has not confirmed the cancel", len(emitter.events))
+	}
+}
+
+func TestCancellationPendingError_SanitizesProviderText(t *testing.T) {
+	err := &CancellationPendingError{
+		InvoiceID:   "inv-1",
+		Status:      "Waiting\nSend\"Cancel",
+		FlowMessage: strings.Repeat("x", maxProviderTextRunes+50),
+	}
+	msg := err.Error()
+	if strings.ContainsAny(msg, "\n\\") {
+		t.Fatalf("error %q keeps control characters or backslashes", msg)
+	}
+	if strings.Contains(msg, `Send"Cancel`) {
+		t.Fatalf("error %q keeps a provider double quote", msg)
+	}
+	if strings.Contains(msg, strings.Repeat("x", maxProviderTextRunes+1)) {
+		t.Fatalf("error %q keeps an untruncated flow message", msg)
 	}
 }
 

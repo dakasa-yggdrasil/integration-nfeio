@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/events"
@@ -69,12 +70,74 @@ func (r *serviceInvoiceReconciler) Destroy(ctx context.Context, ref string) erro
 // named by ref under desired.CompanyID (the documented company_id input) and
 // falls back to the instance default company when that is empty. The
 // ExecuteHandler bridge copies the documented invoice_id input to ref.
+//
+// Success means NFe.io reported the invoice as Cancelled. Any other status
+// returns a CancellationPendingError, so the SDK neither answers
+// {"deleted":true} nor emits nfeio.service_invoice.destroyed while the
+// fiscal document is still valid.
 func (r *serviceInvoiceReconciler) DestroyWithDesired(ctx context.Context, ref string, desired serviceInvoiceDesired) error {
 	if ref == "" {
 		return fmt.Errorf("destroy_service_invoice: ref (invoice_id) required")
 	}
-	_, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{CompanyID: desired.CompanyID, InvoiceID: ref})
-	return err
+	out, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{CompanyID: desired.CompanyID, InvoiceID: ref})
+	if err != nil {
+		return err
+	}
+	if !out.Cancelled {
+		return &CancellationPendingError{InvoiceID: ref, Status: out.Status, FlowMessage: out.FlowMessage}
+	}
+	return nil
+}
+
+// CancellationPendingCode is the code that prefixes a CancellationPendingError
+// message, so callers that only see the error text can still match it.
+const CancellationPendingCode = "cancellation_pending"
+
+// maxProviderTextRunes bounds provider-supplied text copied into errors.
+const maxProviderTextRunes = 200
+
+// CancellationPendingError reports that NFe.io accepted a cancel request but
+// has not confirmed the Cancelled state. NFe.io confirms cancellation
+// asynchronously (the nfse.cancelled webhook), so the invoice is still a valid
+// fiscal document. The error is retryable: calling destroy_service_invoice
+// again later succeeds once NFe.io reports Cancelled. It carries only the
+// invoice id and the provider's status and flow message, never credentials.
+type CancellationPendingError struct {
+	InvoiceID   string
+	Status      string
+	FlowMessage string
+}
+
+func (e *CancellationPendingError) Error() string {
+	return fmt.Sprintf(`%s: destroy_service_invoice: NFe.io has not confirmed the cancellation of invoice "%s" (status "%s", flow_message "%s"); retry later`,
+		CancellationPendingCode,
+		providerText(e.InvoiceID),
+		providerText(e.Status),
+		providerText(e.FlowMessage),
+	)
+}
+
+// Code returns CancellationPendingCode.
+func (e *CancellationPendingError) Code() string { return CancellationPendingCode }
+
+// Retryable reports that a later destroy_service_invoice call may succeed.
+func (e *CancellationPendingError) Retryable() bool { return true }
+
+// providerText makes provider-supplied text safe to embed in an error that
+// the SDK wraps into a JSON body: it drops control characters, backslashes
+// and double quotes, and truncates to maxProviderTextRunes.
+func providerText(s string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == '\\' || r == '"' {
+			return -1
+		}
+		return r
+	}, s)
+	cleaned = strings.TrimSpace(cleaned)
+	if runes := []rune(cleaned); len(runes) > maxProviderTextRunes {
+		cleaned = string(runes[:maxProviderTextRunes]) + "..."
+	}
+	return cleaned
 }
 
 // companyReconciler bridges RegisterCompany/EnsureCompany + ObserveCompanies
