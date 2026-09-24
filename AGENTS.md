@@ -15,7 +15,7 @@ listener** that republishes NFe.io status callbacks to `enterprise-payments.*`.
 The adapter's real contract is whatever **`Describe()` returns** in
 `providers/nfeio/adapter/spec.go`. Read it before changing anything; it owns the
 capability list, resource types, credential/instance schemas, transport, and
-version (`AdapterVersion = "3.1.2"`). `CLAUDE.md` has the full map. If a doc
+version (`AdapterVersion = "3.2.0"`). `CLAUDE.md` has the full map. If a doc
 disagrees with `spec.go`, `spec.go` wins.
 
 ## Capabilities
@@ -53,6 +53,13 @@ were removed at v3.0.0. Don't add new `create_/list_/delete_/update_` names.
 - Required creds: `NFEIO_API_KEY`, `NFEIO_WEBHOOK_SECRET` (`config.Load()` exits
   if the API key is empty or the HMAC is not 32 to 64 characters without
   surrounding whitespace).
+- Two Core bearers, never shared. Mutation events go to
+  `YGGDRASIL_CORE_URL` + `/api/v1/events` with `YGGDRASIL_RUN_TOKEN`, the
+  adapter's own event publisher bearer; `instance_id` is Core's per-call
+  `integration.instance.name`. The legacy webhook publish dispatcher reads
+  `YGGDRASIL_CORE_BASE_URL` + `YGGDRASIL_WORKFLOW_RUN_TOKEN`, targets a route
+  Core does not have (`/api/v1/capabilities/invoke`), and is disabled unless
+  both are set.
 
 ## Manifest synchronization
 

@@ -17,7 +17,7 @@ read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
 
 ## Quick facts
 
-- **Version:** `AdapterVersion = "3.1.2"` (`spec.go`).
+- **Version:** `AdapterVersion = "3.2.0"` (`spec.go`).
 - **Transport:** default `http_json`, RPC on `:8081` (`/rpc/describe` +
   `/rpc/execute`); AMQP opt-in via `YGGDRASIL_TRANSPORT=amqp` + `BROKER_URL`
   (queues `yggdrasil.adapter.nfeio.{describe,execute}`). Health `:8080`,
@@ -31,6 +31,11 @@ read `AGENTS.md` (rules) and `CLAUDE.md` (full map).
 - **Credentials (required):** canonical contract keys `nfeio_api_key` and
   `nfeio_webhook_secret`, bound at runtime to `NFEIO_API_KEY` and
   `NFEIO_WEBHOOK_SECRET`.
+- **Core bearers:** mutation events use `YGGDRASIL_CORE_URL` +
+  `YGGDRASIL_RUN_TOKEN` (the adapter's own event bearer) and carry Core's
+  per-call instance name. The legacy publish dispatcher uses
+  `YGGDRASIL_CORE_BASE_URL` + `YGGDRASIL_WORKFLOW_RUN_TOKEN` and is disabled
+  unless both are set (it targets a route Core does not have).
 
 ## Rules
 

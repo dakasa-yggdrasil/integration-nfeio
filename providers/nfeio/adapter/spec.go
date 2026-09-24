@@ -108,7 +108,7 @@ const (
 // AdapterVersion is the single source for the version advertised by the
 // running adapter. Release builds override this variable with the same value
 // read from this source file so the image identity and Describe stay aligned.
-var AdapterVersion = "3.1.2"
+var AdapterVersion = "3.2.0"
 
 // SupportedExecuteOperations lists the operations callable via the execute
 // RPC path. The reactor (nfse_webhook_received) is intentionally excluded —
@@ -299,7 +299,7 @@ func actionCatalog() []contract.IntegrationActionDefinition {
 		// service_invoice canonical triple (collapses issue_nfse / get_nfse_status / cancel_nfse).
 		{Name: OpEnsureServiceInvoice, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Ensure a service invoice exists for the given external_id. POST /v2/companies/{id}/serviceinvoices; 409 duplicate decoded into existing invoice envelope (idempotent success)."},
 		{Name: OpObserveServiceInvoices, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Read service invoices: with filter {id} returns one (GET /v2/companies/{id}/serviceinvoices/{id}); otherwise paginated GET /v2/companies/{id}/serviceinvoices."},
-		{Name: OpDestroyServiceInvoice, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Cancel (destroy) an emitted NFSe. PUT /v2/companies/{id}/serviceinvoices/{id}/cancel. 422 cancellation_window_closed is terminal failure; 404 → already-absent success."},
+		{Name: OpDestroyServiceInvoice, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Cancel (destroy) an emitted NFSe. PUT /v2/companies/{id}/serviceinvoices/{id}/cancel. Succeeds only when NFe.io reports Cancelled; any other status fails with the retryable cancellation_pending error. 422 cancellation_window_closed is terminal failure; 404 is returned as an error."},
 		// File URL helpers (allowlisted).
 		{Name: OpRetrievePDF, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve signed PDF download URL for an emitted NFSe (allowlisted helper)."},
 		{Name: OpRetrieveXML, Category: "capability", Idempotent: true, ResourceTypes: []string{ResourceServiceInvoice}, Description: "Retrieve signed XML download URL for an emitted NFSe (allowlisted helper)."},

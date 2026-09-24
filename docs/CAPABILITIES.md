@@ -75,10 +75,27 @@ result (`GET /v2/companies/{id}/serviceinvoices/{invoice_id}`); otherwise pagina
 
 ### `destroy_service_invoice`
 Cancel an emitted NFSe. `PUT /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel`.
-A 422 `cancellation_window_closed` is **terminal** (compensate, don't retry); a 404
-is treated as already-absent success.
+The call succeeds only when NFe.io reports the invoice as `Cancelled`.
 
-- **Required input:** `invoice_id`. **Optional:** `company_id`.
+- **Required input:** `invoice_id`. **Optional:** `company_id` (defaults to the
+  instance `NFEIO_COMPANY_ID`).
+- **Output:** `{"deleted": true}`, only after NFe.io reports `Cancelled`. Emits
+  `nfeio.service_invoice.destroyed` with `resource_id` equal to the invoice id.
+- **Pending cancel:** NFe.io confirms cancellation asynchronously (the
+  `nfse.cancelled` webhook). While the returned status is anything other than
+  `Cancelled`, the call fails with a retryable error whose message starts with
+  `cancellation_pending:` and names the invoice id, the NFe.io status and its
+  flow message. No destroyed event is emitted, because the fiscal document is
+  still valid. Retry later.
+- **Errors:** a 422 `cancellation_window_closed` is **terminal** (compensate,
+  don't retry). A 404 is returned as a terminal NFe.io error; it is **not**
+  treated as already-absent success.
+- **Identifier precedence:** the execute bridge copies `invoice_id` to `ref`
+  only when the input carries none of `ref`, `service_invoice_id` or `id`
+  (v3.2.0), so a caller that already sends one of them keeps the SDK's order
+  (`ref`, then `service_invoice_id`, then `id`). Before v3.2.0 the documented
+  `{invoice_id}` input failed with an empty ref.
+- Company and invoice ids are escaped as single URL path segments.
 
 ### `retrieve_pdf`
 `GET /v2/companies/{id}/serviceinvoices/{invoice_id}/pdf` → signed S3 download URL
@@ -244,6 +261,9 @@ Pipeline (see `providers/nfeio/adapter/webhook_server.go`):
 4. Map the normalized state to a queue and publish the raw body via the
    `publish_message` capability on the `rabbitmq-topology` instance, routed through
    `yggdrasil-core` (`POST /api/v1/capabilities/invoke`). Success → `202 Accepted`.
+   Core has no such route, so the publish dispatcher is disabled unless
+   `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are both set;
+   while disabled the listener logs and drops the event.
    Unknown event → `202` (logged, not enqueued — avoids an NFe.io retry storm).
 
 | Normalized status | Target queue |
@@ -254,4 +274,36 @@ Pipeline (see `providers/nfeio/adapter/webhook_server.go`):
 
 See the sequence diagram in the [README](../README.md#webhooks--reactors) and the
 [webhook runbook](./OPERATIONS.md#webhook-runbook).
-</content>
+
+---
+
+## Mutation events
+
+The SDK reconcile dispatch emits one event after every successful ensure or
+destroy on the three reconciled resources. It posts to `yggdrasil-core`
+`POST /api/v1/events` when `YGGDRASIL_CORE_URL` is set, with
+`YGGDRASIL_RUN_TOKEN` as the bearer, and never fails the capability call.
+
+| Event type | Capability | `resource_id` |
+|---|---|---|
+| `nfeio.service_invoice.ensured` | `ensure_service_invoice` | NFe.io invoice `id` |
+| `nfeio.service_invoice.destroyed` | `destroy_service_invoice` | the cancelled invoice id |
+| `nfeio.company.ensured` | `ensure_company` | NFe.io company `id` |
+| `nfeio.webhook_subscription.ensured` | `ensure_webhook_subscription` | webhook `id` |
+| `nfeio.webhook_subscription.destroyed` | `destroy_webhook_subscription` | webhook `id` |
+
+- `instance_id` is the per-call `integration.instance.name` from Core's
+  execute envelope, lifted to the top-level `instance_id` without touching
+  `input`. The adapter serves every envelope with its one NFe.io credential
+  set, so DaKasa grants its event principal only `nfeio-dakasa-production`
+  and Core refuses events naming any other instance. An envelope without an
+  instance name yields an empty `instance_id`, which Core also refuses.
+- `idempotency` comes from `metadata.idempotency` only when a direct caller of
+  the adapter sets it; Core does not set it for workflow steps, so the SDK
+  normally synthesizes a fresh key per event. Core dedups events on (event
+  type, idempotency key) across instances, so a reused key records only the
+  first event.
+- `observed` is the capability output. Webhook events carry only `id` and
+  `insecure_ssl`, never provider secrets.
+- `destroy_company` always fails (NFe.io has no delete) and `bulk_issue`,
+  observes and helpers are not reconciler mutations, so none of them emit.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
 	"github.com/dakasa-yggdrasil/yggdrasil-sdk-go/sdk/events"
@@ -60,12 +61,83 @@ func (r *serviceInvoiceReconciler) Observe(ctx context.Context, filter map[strin
 	return out.Items, out.Cursor, nil
 }
 
+// Destroy cancels the invoice named by ref under the instance default company.
 func (r *serviceInvoiceReconciler) Destroy(ctx context.Context, ref string) error {
+	return r.DestroyWithDesired(ctx, ref, serviceInvoiceDesired{})
+}
+
+// DestroyWithDesired is preferred by the SDK dispatch. It cancels the invoice
+// named by ref under desired.CompanyID (the documented company_id input) and
+// falls back to the instance default company when that is empty. The
+// ExecuteHandler bridge copies the documented invoice_id input to ref.
+//
+// Success means NFe.io reported the invoice as Cancelled. Any other status
+// returns a CancellationPendingError, so the SDK neither answers
+// {"deleted":true} nor emits nfeio.service_invoice.destroyed while the
+// fiscal document is still valid.
+func (r *serviceInvoiceReconciler) DestroyWithDesired(ctx context.Context, ref string, desired serviceInvoiceDesired) error {
 	if ref == "" {
 		return fmt.Errorf("destroy_service_invoice: ref (invoice_id) required")
 	}
-	_, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{InvoiceID: ref})
-	return err
+	out, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{CompanyID: desired.CompanyID, InvoiceID: ref})
+	if err != nil {
+		return err
+	}
+	if !out.Cancelled {
+		return &CancellationPendingError{InvoiceID: ref, Status: out.Status, FlowMessage: out.FlowMessage}
+	}
+	return nil
+}
+
+// CancellationPendingCode is the code that prefixes a CancellationPendingError
+// message, so callers that only see the error text can still match it.
+const CancellationPendingCode = "cancellation_pending"
+
+// maxProviderTextRunes bounds provider-supplied text copied into errors.
+const maxProviderTextRunes = 200
+
+// CancellationPendingError reports that NFe.io accepted a cancel request but
+// has not confirmed the Cancelled state. NFe.io confirms cancellation
+// asynchronously (the nfse.cancelled webhook), so the invoice is still a valid
+// fiscal document. The error is retryable: calling destroy_service_invoice
+// again later succeeds once NFe.io reports Cancelled. It carries only the
+// invoice id and the provider's status and flow message, never credentials.
+type CancellationPendingError struct {
+	InvoiceID   string
+	Status      string
+	FlowMessage string
+}
+
+func (e *CancellationPendingError) Error() string {
+	return fmt.Sprintf(`%s: destroy_service_invoice: NFe.io has not confirmed the cancellation of invoice "%s" (status "%s", flow_message "%s"); retry later`,
+		CancellationPendingCode,
+		providerText(e.InvoiceID),
+		providerText(e.Status),
+		providerText(e.FlowMessage),
+	)
+}
+
+// Code returns CancellationPendingCode.
+func (e *CancellationPendingError) Code() string { return CancellationPendingCode }
+
+// Retryable reports that a later destroy_service_invoice call may succeed.
+func (e *CancellationPendingError) Retryable() bool { return true }
+
+// providerText makes provider-supplied text safe to embed in an error that
+// the SDK wraps into a JSON body: it drops control characters, backslashes
+// and double quotes, and truncates to maxProviderTextRunes.
+func providerText(s string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == '\\' || r == '"' {
+			return -1
+		}
+		return r
+	}, s)
+	cleaned = strings.TrimSpace(cleaned)
+	if runes := []rune(cleaned); len(runes) > maxProviderTextRunes {
+		cleaned = string(runes[:maxProviderTextRunes]) + "..."
+	}
+	return cleaned
 }
 
 // companyReconciler bridges RegisterCompany/EnsureCompany + ObserveCompanies
@@ -163,13 +235,25 @@ func WireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*M
 
 // WireReconcilersWithInstance is the v0.6.0 variant accepting an
 // instanceID so emitted MutationEvents carry the multi-tenant scope.
-// Callers that already know the integration_instance label (e.g. the
-// hand-written executeRoute when migrated) should prefer this form.
-// When instanceID is empty, the SDK forwards an empty string into
-// MutationEvent.InstanceID and the receiver can fall back to any
-// envelope-scoped label.
+// instanceID is only the fallback: the SDK prefers the top-level
+// instance_id of each execute envelope, which ExecuteHandler lifts from
+// Core's integration.instance.name (withEnvelopeInstance). Production
+// passes "" so an envelope without an instance name yields an event with
+// an empty InstanceID, which Core refuses (fail closed). The adapter does
+// not bind the envelope's instance to its credentials: it serves every
+// envelope with its one NFe.io credential set. Core's event principal
+// grants only the production instance, so events naming another instance
+// are refused.
+//
+// The emitter comes from the environment (newEmitterFromEnv).
 func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string) {
-	emitter := newEmitterFromEnv()
+	wireReconcilers(a, cli, templates, instanceID, newEmitterFromEnv())
+}
+
+// wireReconcilers installs the reconcilers with an explicit emitter. It is
+// the test seam: tests pass a capturing emitter to assert on the
+// MutationEvents the SDK emits through the production ExecuteHandler.
+func wireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string, emitter events.Emitter) {
 	commonOpts := []reconcile.Option{
 		reconcile.WithProvider(Provider),
 		reconcile.WithEmitter(emitter),
@@ -194,10 +278,14 @@ func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates m
 }
 
 // newEmitterFromEnv returns an events.Emitter wired to yggdrasil-core
-// when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. Env-driven
+// when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. The HTTP
+// emitter keeps the SDK defaults: it POSTs to YGGDRASIL_CORE_URL +
+// /api/v1/events with YGGDRASIL_RUN_TOKEN as the bearer. That token is
+// this adapter's own event publisher credential; the legacy publish
+// dispatcher reads its own pair (PublishDispatcherFromEnv). Env-driven
 // keeps the Lego principle (no broker / secret-store / cloud is
 // hardcoded). Emission is best-effort per reconcile.WithEmitter
-// docstring — failures log WARN but do not fail the capability call.
+// docstring: failures log WARN but do not fail the capability call.
 func newEmitterFromEnv() events.Emitter {
 	if os.Getenv(events.EnvCoreURL) == "" {
 		return &events.NoopEmitter{}

@@ -37,7 +37,7 @@ Fiscal-document lifecycle on top of NFe.io (`domain: payments`):
 
 ## Transport & version
 
-- **`AdapterVersion = "3.1.2"`** (in `spec.go`; also the default for the
+- **`AdapterVersion = "3.2.0"`** (in `spec.go`; also the default for the
   link-time-overridable `main.Version`).
 - **Default transport is `http_json`** — RPC served on **port 8081**
   (`RPC_PORT`), routes `/rpc/describe` + `/rpc/execute`.
@@ -64,7 +64,7 @@ resource lifecycles, with documented helper/action exceptions).
 |---|---|---|
 | `ensure_service_invoice` | service_invoice | issue NFSe; 409 duplicate → idempotent success |
 | `observe_service_invoices` | service_invoice | filter by `{id}` (one) or paginate (list) |
-| `destroy_service_invoice` | service_invoice | cancel NFSe; 404 → already-absent success |
+| `destroy_service_invoice` | service_invoice | cancel NFSe; success only when NFe.io reports `Cancelled`, otherwise retryable `cancellation_pending`; 404 is an error |
 | `retrieve_pdf` | service_invoice | allowlisted helper — signed PDF URL |
 | `retrieve_xml` | service_invoice | allowlisted helper — signed XML URL |
 | `ensure_company` | company | register at NFe.io; 409 → idempotent success |
@@ -112,10 +112,10 @@ Key files in `providers/nfeio/adapter/`:
 
 - `spec.go` — `Describe()` contract, capability constants, `SupportedExecuteOperations`, action catalog, Prometheus metrics. **Source of truth.**
 - `adapter.go` — `DescribeHandler`, `ExecuteHandler`, `executeRoute` switch for canonical ops and allowlisted actions.
-- `reconcilers.go` — `WireReconcilersWithInstance`: installs the SDK reconcile dispatch (ensure/observe/destroy triples + §6.5 mutation-event emission) ahead of the action switch.
+- `reconcilers.go`: `WireReconcilersWithInstance` installs the SDK reconcile dispatch (ensure/observe/destroy triples + §6.5 mutation-event emission) ahead of the action switch. `wireReconcilers` is the emitter test seam. `instance_id` on each event is Core's per-call `integration.instance.name`, lifted by `withEnvelopeInstance` in `adapter.go`; there is no static label.
 - `client.go` / `bearer.go` — NFe.io v2 HTTP client + auth.
 - `webhook_server.go` — inbound webhook listener: HMAC verify → LRU dedup → normalize → publish.
-- `publish_dispatch.go` — republishes normalized webhook events to `enterprise-payments.*`.
+- `publish_dispatch.go`: republishes normalized webhook events to `enterprise-payments.*` via `/api/v1/capabilities/invoke`, a route Core does not have. `PublishDispatcherFromEnv` keeps it disabled unless `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are both set.
 - `issue_nfse.go` / `cancel_nfse.go` / `get_nfse_status.go` / `register_company.go` / `bulk_issue.go` / `retrieve_pdf.go` / `retrieve_xml.go` / `list_municipalities.go` / `manage_template.go` / `tax_calc.go` / `template_loader.go` / `webhook_subscription.go` — per-operation logic (filenames still use legacy NFSe verbs).
 
 ## Credentials & instance config
@@ -135,7 +135,13 @@ From `Describe()` / `config.go`:
   `RPC_PORT` (8081), `WEBHOOK_PORT` (8082), `HEALTHCHECK_PORT` (8080),
   `TEMPLATES_DIR` (default `manifest/templates`; falls back to the binary's
   embedded templates if absent), `YGGDRASIL_TRANSPORT`, `BROKER_URL`,
-  `YGGDRASIL_CORE_URL`, `RABBITMQ_TOPOLOGY_INSTANCE`, `YGGDRASIL_RUN_TOKEN`.
+  `RABBITMQ_TOPOLOGY_INSTANCE`.
+- **Core bearers (never shared):** `YGGDRASIL_CORE_URL` + `YGGDRASIL_RUN_TOKEN`
+  feed the SDK mutation event emitter (`POST /api/v1/events`);
+  `YGGDRASIL_RUN_TOKEN` is the adapter's own event publisher bearer and
+  nothing else reads it. `YGGDRASIL_CORE_BASE_URL` +
+  `YGGDRASIL_WORKFLOW_RUN_TOKEN` feed only the legacy publish dispatcher,
+  which is disabled unless both are set.
 
 ## Webhook security
 
@@ -166,7 +172,7 @@ body when no id is present) through an LRU cache, then normalizes and publishes.
 ## Manifest ↔ `spec.go`
 
 `manifest/integration_type.nfeio.yaml` is a static snapshot of `Describe()` and
-is currently **in sync** with `spec.go` (version `3.1.2`, no `register_company`
+is currently **in sync** with `spec.go` (version `3.2.0`, no `register_company`
 default action, `thirdparty.nfeio.municipality_template` prefix,
 `.{external_id}`/`.{federal_tax_number}`/`.{code}` identity templates, canonical
 lower-case credential keys, `environment` enum). **`Describe()` is authoritative; do not

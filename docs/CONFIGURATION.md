@@ -60,9 +60,43 @@ applied when unset.
 | `YGGDRASIL_TRANSPORT` | no | `http_json` | `main.go` | RPC transport: `http_json`/`http` (HTTP) or `amqp`/`rabbitmq` (AMQP). |
 | `RPC_PORT` | no | `8081` | `main.go` | HTTP RPC port (`/rpc/describe`, `/rpc/execute`). HTTP transport only. |
 | `BROKER_URL` | conditional | — | `main.go` | AMQP broker URL. **Required and fatal-if-empty only when `YGGDRASIL_TRANSPORT=amqp`.** Unused under HTTP. |
-| `YGGDRASIL_CORE_URL` | no | `http://yggdrasil-core:9080` | `main.go` | Core endpoint the reactor's `publish_message` dispatcher POSTs to (`/api/v1/capabilities/invoke`). |
-| `RABBITMQ_TOPOLOGY_INSTANCE` | no | `rabbitmq-topology-default` | `main.go` | `instance_ref` used by the publish dispatcher. |
-| `YGGDRASIL_RUN_TOKEN` | no | _(empty)_ | `main.go` | Bearer token for the `publish_message` call to core. When empty, the call is sent without an `Authorization` header. |
+| `YGGDRASIL_CORE_URL` | no | _(empty)_ | `reconcilers.go` (SDK emitter) | Core base URL for mutation events (`POST /api/v1/events`). When empty, events are suppressed by a no-op emitter that logs a WARN. |
+| `YGGDRASIL_RUN_TOKEN` | no | _(empty)_ | SDK emitter | The adapter's own event publisher bearer for `/api/v1/events` (ADR-0279). Nothing else in the adapter reads it. |
+| `RABBITMQ_TOPOLOGY_INSTANCE` | no | `rabbitmq-topology-default` | `main.go` | `instance_ref` used by the legacy publish dispatcher. |
+| `YGGDRASIL_CORE_BASE_URL` | no | _(empty, no default)_ | `publish_dispatch.go` | Core base URL of the legacy webhook publish dispatcher. The dispatcher is disabled unless this and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are both set. |
+| `YGGDRASIL_WORKFLOW_RUN_TOKEN` | no | _(empty)_ | `publish_dispatch.go` | Bearer of the legacy webhook publish dispatcher. Required, together with `YGGDRASIL_CORE_BASE_URL`, to enable it. |
+
+### Core bearers
+
+The adapter talks to `yggdrasil-core` through two independent clients, and
+each has its own URL and bearer. They never fall back to each other.
+
+| Client | URL env | Bearer env | Route | Default state |
+|---|---|---|---|---|
+| Mutation event emitter (SDK) | `YGGDRASIL_CORE_URL` | `YGGDRASIL_RUN_TOKEN` | `POST /api/v1/events` | on when `YGGDRASIL_CORE_URL` is set |
+| Legacy webhook publish dispatcher | `YGGDRASIL_CORE_BASE_URL` | `YGGDRASIL_WORKFLOW_RUN_TOKEN` | `POST /api/v1/capabilities/invoke` | off unless both are set |
+
+Core has no `/api/v1/capabilities/invoke` route, so an enabled publish
+dispatcher only gets 404. Keep it disabled. With it disabled the adapter logs a
+WARN at startup and the legacy listener logs and drops each event.
+
+Each mutation event carries `instance_id` from Core's per-call
+`integration.instance.name`. There is no env var for it. The adapter does not
+bind that name to its credentials: it serves every envelope with the one NFe.io
+credential set it was started with. DaKasa therefore grants the adapter's event
+principal only `nfeio-dakasa-production`, and Core refuses events that name any
+other instance or carry an empty `instance_id`.
+
+**What DaKasa production needs for its events to be accepted.** Core accepts
+`/api/v1/events` only from an event publisher principal, never from the shared
+workflow-run token, so both of these live in dakasa-system:
+
+1. An event publisher principal for this adapter in Core, with its own token
+   Secret, granted the five `nfeio.*` event types on `nfeio-dakasa-production`
+   only.
+2. A deploy change that sets `YGGDRASIL_CORE_URL` to the Core Service URL and
+   `YGGDRASIL_RUN_TOKEN` from that token Secret, and keeps `WEBHOOK_PORT`,
+   `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` absent.
 
 ## Ports
 
@@ -91,4 +125,3 @@ applied when unset.
 
 - Per-capability input/output: [CAPABILITIES.md](./CAPABILITIES.md).
 - Health, metrics, webhook runbook: [OPERATIONS.md](./OPERATIONS.md).
-</content>

@@ -43,7 +43,8 @@ flowchart LR
   core -- "HTTP-JSON<br/>/rpc/describe · /rpc/execute" --> adapter
   adapter -- "REST + API key" --> nfeio
   nfeio -. "production signed webhook" .-> payments
-  adapter -- "publish_message → rabbitmq-topology" --> core
+  adapter -- "mutation events<br/>POST /api/v1/events" --> core
+  adapter -. "legacy publish_message<br/>(disabled by default)" .-> core
 ```
 
 ### Integration model
@@ -74,7 +75,7 @@ schemas in [docs/CAPABILITIES.md](./docs/CAPABILITIES.md).
 |---|---|---|
 | `ensure_service_invoice` | `service_invoice` | Issue an NFSe; 409 duplicate → idempotent success |
 | `observe_service_invoices` | `service_invoice` | Read one (`{id}`/`{invoice_id}`) or paginate |
-| `destroy_service_invoice` | `service_invoice` | Cancel an emitted NFSe; 404 → already-absent |
+| `destroy_service_invoice` | `service_invoice` | Cancel an emitted NFSe; succeeds only once NFe.io reports `Cancelled`, otherwise a retryable `cancellation_pending` error; 404 is an error |
 | `retrieve_pdf` | `service_invoice` | Signed PDF download URL (allowlisted helper) |
 | `retrieve_xml` | `service_invoice` | Signed XML download URL (allowlisted helper) |
 | `bulk_issue` | `service_invoice` | Bulk-issue **up to 50** NFSe, semaphore 5, partial-failure |
@@ -91,6 +92,30 @@ schemas in [docs/CAPABILITIES.md](./docs/CAPABILITIES.md).
 > Capability names follow the Yggdrasil `ensure_/observe_/destroy_` convention.
 > The pre-v2.0.0 compatibility aliases were removed at the v3.0.0 major boundary.
 > See [CHANGELOG.md](./CHANGELOG.md).
+
+### Mutation events
+
+Every successful ensure or destroy through the reconcilers posts a mutation
+event to `yggdrasil-core` (`POST /api/v1/events`) when `YGGDRASIL_CORE_URL` is
+set, with `YGGDRASIL_RUN_TOKEN` as the bearer. Emission is best effort: a
+refused event logs a WARN and never fails the capability call.
+
+| Event type | Emitted by | `resource_id` |
+|---|---|---|
+| `nfeio.service_invoice.ensured` | `ensure_service_invoice` | NFe.io invoice `id` |
+| `nfeio.service_invoice.destroyed` | `destroy_service_invoice`, only after NFe.io reports `Cancelled` | the cancelled `invoice_id` |
+| `nfeio.company.ensured` | `ensure_company` | NFe.io company `id` |
+| `nfeio.webhook_subscription.ensured` | `ensure_webhook_subscription` | webhook `id` |
+| `nfeio.webhook_subscription.destroyed` | `destroy_webhook_subscription` | webhook `id` |
+
+`instance_id` is the per-call `integration.instance.name` from Core's execute
+envelope. The adapter does not bind that name to its credentials: it serves
+every envelope with the one NFe.io credential set it was started with. DaKasa
+therefore grants the adapter's event principal only `nfeio-dakasa-production`,
+and Core refuses events that name any other instance. There is no static
+fallback: an envelope without an instance name yields an empty `instance_id`,
+which Core also refuses. `destroy_company` is not supported by
+NFe.io and `bulk_issue` is an action, so neither emits.
 
 ## Quick start
 
@@ -132,6 +157,10 @@ no surrounding whitespace. The rest have safe defaults. Full table in
 | `RPC_PORT` | no | no | `8081` | HTTP RPC port (`/rpc/describe`, `/rpc/execute`) |
 | `HEALTHCHECK_PORT` | no | no | `8080` | Health + `/metrics` port |
 | `WEBHOOK_PORT` | no | no | `8082` | Inbound webhook port (`/webhook/nfeio`) |
+| `YGGDRASIL_CORE_URL` | no | no | _(empty)_ | Core base URL for mutation events (`POST /api/v1/events`); unset disables emission |
+| `YGGDRASIL_RUN_TOKEN` | no | yes | _(empty)_ | The adapter's own event publisher bearer for `/api/v1/events`; nothing else reads it |
+| `YGGDRASIL_CORE_BASE_URL` | no | no | _(empty)_ | Legacy publish dispatcher URL; the dispatcher is disabled unless this and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are set |
+| `YGGDRASIL_WORKFLOW_RUN_TOKEN` | no | yes | _(empty)_ | Legacy publish dispatcher bearer; see the webhook section below |
 
 ## Usage
 
@@ -167,6 +196,13 @@ For legacy normalized callbacks, the adapter's listener (port `8082`, path
 `{issued | cancelled | processing_failed}`, and publishes to the matching
 `enterprise-payments.nfe.*` queue via the `publish_message` capability on the
 `rabbitmq-topology` instance.
+
+> **The publish dispatcher is disabled by default.** It posts to
+> `/api/v1/capabilities/invoke`, a route `yggdrasil-core` does not have, so an
+> enabled dispatcher only gets 404. It is wired only when both
+> `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are set. Otherwise
+> the adapter logs a WARN at startup and the listener logs and drops each event.
+> It never reads `YGGDRASIL_CORE_URL` or `YGGDRASIL_RUN_TOKEN`.
 
 ```mermaid
 sequenceDiagram
@@ -217,11 +253,9 @@ Repo layout, the describe/execute contract, and `pkg/contractcheck` are covered 
 
 - Go **1.25**.
 - `yggdrasil-sdk-go` **v0.9.1** (`adapter`, `webhookhttp`, `sdk/reconcile`, `sdk/events`).
-- Adapter version reported by `Describe()`: **3.1.2** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
+- Adapter version reported by `Describe()`: **3.2.0** (`AdapterVersion` in `providers/nfeio/adapter/spec.go`).
 - Transport: HTTP-JSON (default) or AMQP, selected by `YGGDRASIL_TRANSPORT`.
 
 ## License
 
 [Apache-2.0](./LICENSE).
-</content>
-</invoke>

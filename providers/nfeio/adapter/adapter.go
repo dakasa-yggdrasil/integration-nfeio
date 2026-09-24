@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
@@ -36,6 +37,12 @@ func DescribeHandler(logger *zap.Logger) sdkadapter.Handler {
 // fall back to executeRoute. The reactor
 // (nfse_webhook_received) is intentionally NOT routed here — it is
 // triggered exclusively by the webhook HTTP server.
+//
+// Since v3.2.0 the dispatch path receives a copy of the delivery whose
+// body carries Core's per-call instance name and idempotency key at the
+// top level (see withEnvelopeInstance), so every mutation event names
+// the integration instance that Core actually invoked. The executeRoute
+// fallback keeps the original body.
 func ExecuteHandler(
 	logger *zap.Logger,
 	a *sdkadapter.Adapter,
@@ -44,7 +51,9 @@ func ExecuteHandler(
 	deps *ExecuteDeps,
 ) sdkadapter.Handler {
 	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
-		body, _, dispatchErr := reconcile.Dispatch(ctx, a, d)
+		sdkDelivery := d
+		sdkDelivery.Body = withServiceInvoiceDestroyRef(withEnvelopeInstance(d.Body))
+		body, _, dispatchErr := reconcile.Dispatch(ctx, a, sdkDelivery)
 		if dispatchErr == nil {
 			return body, "application/json", nil
 		}
@@ -60,6 +69,138 @@ func ExecuteHandler(
 		}
 		return body, "application/json", nil
 	}
+}
+
+// withEnvelopeInstance lifts Core's per-call identity onto the top-level
+// fields the SDK reconcile dispatch reads for mutation events:
+//
+//   - instance_id  from integration.instance.name
+//   - idempotency  from metadata.idempotency
+//
+// Core does not set metadata.idempotency for workflow steps, so only direct
+// callers supply a key; otherwise the SDK synthesizes one per event. Core
+// dedups events on (event type, idempotency key) across instances.
+//
+// Each field is set only when the envelope does not already carry a
+// value for it (missing, null or ""). When Core sends no instance name,
+// instance_id stays empty and Core refuses the event, which fails closed
+// instead of guessing a label that could belong to another instance.
+//
+// The input object is never touched: the webhook_subscription decoders
+// reject any unknown key that does not start with "__". A body that is
+// not a JSON object, or that needs no change, is returned unchanged.
+func withEnvelopeInstance(body []byte) []byte {
+	var env map[string]json.RawMessage
+	if err := json.Unmarshal(body, &env); err != nil || env == nil {
+		return body
+	}
+	changed := false
+	if rawFieldAbsent(env["instance_id"]) {
+		var integration struct {
+			Instance struct {
+				Name string `json:"name"`
+			} `json:"instance"`
+		}
+		if raw, ok := env["integration"]; ok && json.Unmarshal(raw, &integration) == nil {
+			if name := strings.TrimSpace(integration.Instance.Name); name != "" {
+				if encoded, err := json.Marshal(name); err == nil {
+					env["instance_id"] = encoded
+					changed = true
+				}
+			}
+		}
+	}
+	if rawFieldAbsent(env["idempotency"]) {
+		var metadata struct {
+			Idempotency json.RawMessage `json:"idempotency"`
+		}
+		if raw, ok := env["metadata"]; ok && json.Unmarshal(raw, &metadata) == nil {
+			var key string
+			if json.Unmarshal(metadata.Idempotency, &key) == nil {
+				if key = strings.TrimSpace(key); key != "" {
+					if encoded, err := json.Marshal(key); err == nil {
+						env["idempotency"] = encoded
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(env)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// withServiceInvoiceDestroyRef copies input.invoice_id to input.ref for
+// destroy_service_invoice only. The documented input is
+// {invoice_id[, company_id]}, but the SDK destroy path infers the ref from
+// ref, service_invoice_id or id, in that order. Without the copy it inferred
+// an empty ref, the cancel failed, and nfeio.service_invoice.destroyed never
+// fired. The copy happens only when none of those three keys carries a value,
+// so a caller that already sends one keeps the SDK's precedence. Every other
+// operation, and a body that needs no change, is returned unchanged.
+func withServiceInvoiceDestroyRef(body []byte) []byte {
+	var env map[string]json.RawMessage
+	if err := json.Unmarshal(body, &env); err != nil || env == nil {
+		return body
+	}
+	if envelopeOperation(env) != OpDestroyServiceInvoice {
+		return body
+	}
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(env["input"], &input); err != nil || input == nil {
+		return body
+	}
+	for _, key := range []string{"ref", "service_invoice_id", "id"} {
+		if !rawFieldAbsent(input[key]) {
+			return body
+		}
+	}
+	var invoiceID string
+	if err := json.Unmarshal(input["invoice_id"], &invoiceID); err != nil || strings.TrimSpace(invoiceID) == "" {
+		return body
+	}
+	encodedRef, err := json.Marshal(invoiceID)
+	if err != nil {
+		return body
+	}
+	input["ref"] = encodedRef
+	encodedInput, err := json.Marshal(input)
+	if err != nil {
+		return body
+	}
+	env["input"] = encodedInput
+	out, err := json.Marshal(env)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// envelopeOperation mirrors the SDK dispatch: operation wins, capability is
+// the fallback.
+func envelopeOperation(env map[string]json.RawMessage) string {
+	for _, key := range []string{"operation", "capability"} {
+		var op string
+		if json.Unmarshal(env[key], &op) == nil {
+			if op = strings.TrimSpace(op); op != "" {
+				return op
+			}
+		}
+	}
+	return ""
+}
+
+// rawFieldAbsent reports whether a top-level envelope field carries no
+// value: missing, JSON null, or the empty string.
+func rawFieldAbsent(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed == "" || trimmed == "null" || trimmed == `""`
 }
 
 // isUnsupportedReconcileOp matches the SDK's "unsupported operation"
@@ -329,7 +470,7 @@ func IssueNFSe(ctx context.Context, cli *Client, templates map[string]*Municipio
 	}
 
 	out := &IssueNFSeOutput{}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", companyID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", pathSegment(companyID))
 	err := cli.do(ctx, http.MethodPost, path, body, out)
 	if err == nil {
 		return out, nil
@@ -401,7 +542,7 @@ func ObserveServiceInvoices(ctx context.Context, cli *Client, raw []byte) (*Obse
 	// List path. NFe.io paginates server-side; the response carries items
 	// + an optional cursor in the meta envelope. We mirror that to the
 	// caller verbatim so downstream pagination follows the same shape.
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", companyID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", pathSegment(companyID))
 	if in.Cursor != "" {
 		path += "?cursor=" + in.Cursor
 	}
@@ -435,7 +576,7 @@ func GetNFSeStatus(ctx context.Context, cli *Client, in GetNFSeStatusInput) (*Is
 		return nil, errors.New("company_id required (no instance default)")
 	}
 	out := &IssueNFSeOutput{}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s", companyID, in.InvoiceID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s", pathSegment(companyID), pathSegment(in.InvoiceID))
 	if err := cli.do(ctx, http.MethodGet, path, nil, out); err != nil {
 		return nil, err
 	}
@@ -471,7 +612,7 @@ func CancelNFSe(ctx context.Context, cli *Client, in CancelNFSeInput) (*CancelNF
 		Status      string `json:"status"`
 		FlowMessage string `json:"flowMessage"`
 	}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/cancel", companyID, in.InvoiceID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/cancel", pathSegment(companyID), pathSegment(in.InvoiceID))
 	if err := cli.do(ctx, http.MethodPut, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -519,7 +660,7 @@ func retrieveDoc(ctx context.Context, cli *Client, in RetrieveDocInput, kind str
 		DocumentURL string `json:"documentUrl"`
 		ExpiresAt   string `json:"expiresAt"`
 	}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/%s", companyID, in.InvoiceID, kind)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/%s", pathSegment(companyID), pathSegment(in.InvoiceID), kind)
 	if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -610,6 +751,13 @@ func RegisterCompany(ctx context.Context, cli *Client, in RegisterCompanyInput) 
 	return nil, err
 }
 
+// pathSegment escapes one caller-supplied value (a company or invoice id) as a
+// single NFe.io URL path segment, so a "/", "?" or "#" in the value can never
+// add path segments, a query or a fragment to the request.
+func pathSegment(value string) string {
+	return url.PathEscape(value)
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {
@@ -668,7 +816,7 @@ func ObserveCompanies(ctx context.Context, cli *Client, raw []byte) (*ObserveCom
 			Name             string `json:"name"`
 			Status           string `json:"status"`
 		}
-		path := fmt.Sprintf("/v2/companies/%s", in.ID)
+		path := fmt.Sprintf("/v2/companies/%s", pathSegment(in.ID))
 		if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
 			return nil, err
 		}
