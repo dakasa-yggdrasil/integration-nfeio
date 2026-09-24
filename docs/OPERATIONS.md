@@ -90,8 +90,12 @@ The adapter serves every envelope with its one NFe.io credential set, so only
 `nfeio-dakasa-production` is granted to its event principal and Core refuses
 events naming any other instance. An execute that names another instance
 still runs against the production credentials; only its event is refused.
-`idempotency` is Core's `metadata.idempotency` when present. Emission is best
-effort, so a refused event only shows up as an adapter WARN:
+`idempotency` comes from `metadata.idempotency` only when a direct caller of the
+adapter sets it. Core does not set it for workflow steps, so the SDK normally
+synthesizes a fresh key per event. Core dedups events on (event type,
+idempotency key), not per instance, so a direct caller that reuses a key
+records only the first event. Emission is best effort, so a refused event only
+shows up as an adapter WARN:
 
 | Log line | Cause | Action |
 |---|---|---|
@@ -112,7 +116,9 @@ WARNs.
 | `YGGDRASIL_TRANSPORT=amqp` fatal at boot | `BROKER_URL` is empty under AMQP transport. |
 | Describe registration rejected by core | Live `Describe()` shape drifted from the stored `integration_type` manifest. Re-check `spec.go` vs `manifest/integration_type.nfeio.yaml`. |
 | `destroy_service_invoice` keeps failing 422 | `cancellation_window_closed` is terminal — the NFSe cancellation window is closed; compensate downstream instead of retrying. |
-| `destroy_service_invoice: ref (invoice_id) required` | The input had neither `invoice_id` nor `ref`. Since v3.2.0 the documented `invoice_id` is enough. |
+| `destroy_service_invoice: ref (invoice_id) required` | The input had none of `invoice_id`, `ref`, `service_invoice_id` or `id`. Since v3.2.0 the documented `invoice_id` is enough. |
+| `cancellation_pending: destroy_service_invoice: ...` | NFe.io accepted the cancel but still reports another status (it confirms asynchronously through the `nfse.cancelled` webhook). The invoice is still a valid fiscal document and no destroyed event was emitted. Retry later; the call succeeds once NFe.io reports `Cancelled`. |
+| `destroy_service_invoice` fails with `status=404` | NFe.io does not know the invoice under that company. A 404 is an error, not already-absent success; check the invoice id and `company_id`. |
 
 ## Cross-references
 

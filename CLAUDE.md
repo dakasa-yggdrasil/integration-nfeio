@@ -64,7 +64,7 @@ resource lifecycles, with documented helper/action exceptions).
 |---|---|---|
 | `ensure_service_invoice` | service_invoice | issue NFSe; 409 duplicate → idempotent success |
 | `observe_service_invoices` | service_invoice | filter by `{id}` (one) or paginate (list) |
-| `destroy_service_invoice` | service_invoice | cancel NFSe; 404 → already-absent success |
+| `destroy_service_invoice` | service_invoice | cancel NFSe; success only when NFe.io reports `Cancelled`, otherwise retryable `cancellation_pending`; 404 is an error |
 | `retrieve_pdf` | service_invoice | allowlisted helper — signed PDF URL |
 | `retrieve_xml` | service_invoice | allowlisted helper — signed XML URL |
 | `ensure_company` | company | register at NFe.io; 409 → idempotent success |

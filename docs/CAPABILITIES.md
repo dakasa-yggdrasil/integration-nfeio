@@ -75,15 +75,27 @@ result (`GET /v2/companies/{id}/serviceinvoices/{invoice_id}`); otherwise pagina
 
 ### `destroy_service_invoice`
 Cancel an emitted NFSe. `PUT /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel`.
-A 422 `cancellation_window_closed` is **terminal** (compensate, don't retry); a 404
-is treated as already-absent success.
+The call succeeds only when NFe.io reports the invoice as `Cancelled`.
 
 - **Required input:** `invoice_id`. **Optional:** `company_id` (defaults to the
   instance `NFEIO_COMPANY_ID`).
-- **Output:** `{"deleted": true}`. Emits `nfeio.service_invoice.destroyed` with
-  `resource_id` equal to the invoice id. The execute bridge copies `invoice_id`
-  to `ref` for this operation when `ref` is absent (v3.2.0); before that the
-  documented input failed with an empty ref.
+- **Output:** `{"deleted": true}`, only after NFe.io reports `Cancelled`. Emits
+  `nfeio.service_invoice.destroyed` with `resource_id` equal to the invoice id.
+- **Pending cancel:** NFe.io confirms cancellation asynchronously (the
+  `nfse.cancelled` webhook). While the returned status is anything other than
+  `Cancelled`, the call fails with a retryable error whose message starts with
+  `cancellation_pending:` and names the invoice id, the NFe.io status and its
+  flow message. No destroyed event is emitted, because the fiscal document is
+  still valid. Retry later.
+- **Errors:** a 422 `cancellation_window_closed` is **terminal** (compensate,
+  don't retry). A 404 is returned as a terminal NFe.io error; it is **not**
+  treated as already-absent success.
+- **Identifier precedence:** the execute bridge copies `invoice_id` to `ref`
+  only when the input carries none of `ref`, `service_invoice_id` or `id`
+  (v3.2.0), so a caller that already sends one of them keeps the SDK's order
+  (`ref`, then `service_invoice_id`, then `id`). Before v3.2.0 the documented
+  `{invoice_id}` input failed with an empty ref.
+- Company and invoice ids are escaped as single URL path segments.
 
 ### `retrieve_pdf`
 `GET /v2/companies/{id}/serviceinvoices/{invoice_id}/pdf` → signed S3 download URL
@@ -286,8 +298,11 @@ destroy on the three reconciled resources. It posts to `yggdrasil-core`
   set, so DaKasa grants its event principal only `nfeio-dakasa-production`
   and Core refuses events naming any other instance. An envelope without an
   instance name yields an empty `instance_id`, which Core also refuses.
-- `idempotency` is Core's `metadata.idempotency` when present; otherwise the
-  SDK synthesizes one.
+- `idempotency` comes from `metadata.idempotency` only when a direct caller of
+  the adapter sets it; Core does not set it for workflow steps, so the SDK
+  normally synthesizes a fresh key per event. Core dedups events on (event
+  type, idempotency key) across instances, so a reused key records only the
+  first event.
 - `observed` is the capability output. Webhook events carry only `id` and
   `insecure_ssl`, never provider secrets.
 - `destroy_company` always fails (NFe.io has no delete) and `bulk_issue`,

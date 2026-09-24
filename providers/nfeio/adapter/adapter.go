@@ -77,6 +77,10 @@ func ExecuteHandler(
 //   - instance_id  from integration.instance.name
 //   - idempotency  from metadata.idempotency
 //
+// Core does not set metadata.idempotency for workflow steps, so only direct
+// callers supply a key; otherwise the SDK synthesizes one per event. Core
+// dedups events on (event type, idempotency key) across instances.
+//
 // Each field is set only when the envelope does not already carry a
 // value for it (missing, null or ""). When Core sends no instance name,
 // instance_id stays empty and Core refuses the event, which fails closed

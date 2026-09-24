@@ -12,8 +12,10 @@ spec:
     Destroy (cancel) an emitted NFSe (v2.0.0 canonical name; collapses
     pre-v2.0.0 cancel_nfse). PUT
     /v2/companies/{id}/serviceinvoices/{invoice_id}/cancel. 422
-    cancellation_window_closed is terminal — caller compensates instead
-    of retrying. 404 → already-absent success per convention §5.
+    cancellation_window_closed is terminal; the caller compensates instead
+    of retrying. Succeeds only when NFe.io reports Cancelled; any other
+    status fails with the retryable cancellation_pending error and emits no
+    destroyed event. A 404 is returned as an error.
   input_schema:
     type: object
     required: [invoice_id]

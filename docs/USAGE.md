@@ -129,9 +129,11 @@ accepts only a legacy normalized body and must remain unexposed from NFe.io.
   concurrency cap of 5, and returns per-item results (`succeeded_count` /
   `failed_count`); partial failures are not an error. > 50 items is a terminal
   `input_too_large`.
-- **Cancel** — `destroy_service_invoice` with `{invoice_id}`. A 422
-  `cancellation_window_closed` is terminal (compensate, don't retry); 404 is treated
-  as already-absent success.
+- **Cancel**: `destroy_service_invoice` with `{invoice_id}`. It succeeds only
+  once NFe.io reports the invoice as `Cancelled`; until then it fails with a
+  retryable `cancellation_pending` error, so retry later. A 422
+  `cancellation_window_closed` is terminal (compensate, don't retry), and a 404
+  is returned as an error, not as already-absent success.
 - **PDF / XML** — `retrieve_pdf` / `retrieve_xml` return a signed download URL.
 - **Pre-flight tax** — `calculate_iss` computes the ISS amount from a município
   template with no network call.

@@ -7,7 +7,10 @@
 - Mutation events now carry a real `instance_id`. The execute handler lifts
   Core's per-call `integration.instance.name` to the envelope's top-level
   `instance_id`, and `metadata.idempotency` to `idempotency`, each only when
-  the envelope does not already set it. The lift never modifies capability `input`,
+  the envelope does not already set it. Core does not set
+  `metadata.idempotency` for workflow steps, so only direct callers supply a
+  key; otherwise the SDK synthesizes one per event. Core dedups on (event
+  type, idempotency key) across instances. The lift never modifies capability `input`,
   so the strict webhook_subscription decoders are unaffected. An envelope without
   an instance name still yields an empty `instance_id`, which Core refuses
   (fail closed); there is no static fallback label.
@@ -21,8 +24,19 @@
   `service_invoice_id` or `id`, so the documented input produced an empty
   ref, the cancel failed and `nfeio.service_invoice.destroyed` never fired.
   The execute bridge now copies `invoice_id` to `input.ref` for this
-  operation only, and the cancel honours the caller's `company_id` instead
-  of always using the instance default.
+  operation only, and only when the input carries none of `ref`,
+  `service_invoice_id` or `id`, so existing callers keep their precedence.
+  The cancel honours the caller's `company_id` instead of always using the
+  instance default.
+- `destroy_service_invoice` no longer reports an invoice destroyed before
+  NFe.io confirms it. The reconciler ignored the cancel result, so the SDK
+  answered `{"deleted":true}` and emitted `nfeio.service_invoice.destroyed`
+  while NFe.io still showed a pending cancel (it confirms asynchronously
+  through the `nfse.cancelled` webhook). Any status other than `Cancelled`
+  now fails with a retryable error prefixed `cancellation_pending:` that
+  names the invoice id, the NFe.io status and its flow message, and no
+  destroyed event is emitted. A 404 on cancel remains an error; the docs
+  that called it already-absent success were corrected.
 
 ### Security
 
@@ -35,14 +49,20 @@
   set; the adapter then logs a WARN at startup and the listener logs and
   drops events. The dispatcher posts to `/api/v1/capabilities/invoke`, a
   route Core does not have, so enabling it only produces 404s.
+- Company and invoice ids are escaped with `url.PathEscape` in every NFe.io
+  service invoice path (ensure, observe, retrieve, cancel) and in the single
+  company lookup, so a `/`, `?` or `#` in an id cannot add path segments, a
+  query or a fragment.
 
 ### Operations
 
-- Production Deployment env after this release:
-  `YGGDRASIL_CORE_URL` (literal Core Service URL) and `YGGDRASIL_RUN_TOKEN`
-  (the adapter's own event publish token Secret). `WEBHOOK_PORT`,
-  `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` must stay
-  absent.
+- Prerequisite, not part of this release: for events to be accepted, the
+  production Deployment must carry `YGGDRASIL_CORE_URL` (literal Core Service
+  URL) and `YGGDRASIL_RUN_TOKEN` from the adapter's own event publish token
+  Secret, and Core must hold an event publisher principal for this adapter
+  granted on `nfeio-dakasa-production`. Both are dakasa-system changes.
+  `WEBHOOK_PORT`, `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN`
+  must stay absent.
 - Emitted event types: `nfeio.service_invoice.ensured`,
   `nfeio.service_invoice.destroyed`, `nfeio.company.ensured`,
   `nfeio.webhook_subscription.ensured` and

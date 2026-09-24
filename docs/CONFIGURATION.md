@@ -87,9 +87,18 @@ credential set it was started with. DaKasa therefore grants the adapter's event
 principal only `nfeio-dakasa-production`, and Core refuses events that name any
 other instance or carry an empty `instance_id`.
 
-DaKasa production carries `YGGDRASIL_CORE_URL` and `YGGDRASIL_RUN_TOKEN` (the
-adapter's own event publish token Secret). `WEBHOOK_PORT`,
-`YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` stay absent.
+**Prerequisite for DaKasa production (not in place yet).** The live Deployment
+does not carry this wiring: its `YGGDRASIL_RUN_TOKEN` is the shared
+workflow-run token, which Core does not accept on `/api/v1/events`, so every
+event is refused today. Two dakasa-system changes must land before this
+adapter's events are accepted:
+
+1. An event publisher principal for this adapter in Core, with its own token
+   Secret, granted the five `nfeio.*` event types on `nfeio-dakasa-production`
+   only.
+2. A deploy change that sets `YGGDRASIL_CORE_URL` to the Core Service URL and
+   `YGGDRASIL_RUN_TOKEN` from that token Secret, and keeps `WEBHOOK_PORT`,
+   `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` absent.
 
 ## Ports
 

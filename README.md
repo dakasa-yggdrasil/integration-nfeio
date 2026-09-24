@@ -75,7 +75,7 @@ schemas in [docs/CAPABILITIES.md](./docs/CAPABILITIES.md).
 |---|---|---|
 | `ensure_service_invoice` | `service_invoice` | Issue an NFSe; 409 duplicate → idempotent success |
 | `observe_service_invoices` | `service_invoice` | Read one (`{id}`/`{invoice_id}`) or paginate |
-| `destroy_service_invoice` | `service_invoice` | Cancel an emitted NFSe; 404 → already-absent |
+| `destroy_service_invoice` | `service_invoice` | Cancel an emitted NFSe; succeeds only once NFe.io reports `Cancelled`, otherwise a retryable `cancellation_pending` error; 404 is an error |
 | `retrieve_pdf` | `service_invoice` | Signed PDF download URL (allowlisted helper) |
 | `retrieve_xml` | `service_invoice` | Signed XML download URL (allowlisted helper) |
 | `bulk_issue` | `service_invoice` | Bulk-issue **up to 50** NFSe, semaphore 5, partial-failure |
@@ -103,7 +103,7 @@ refused event logs a WARN and never fails the capability call.
 | Event type | Emitted by | `resource_id` |
 |---|---|---|
 | `nfeio.service_invoice.ensured` | `ensure_service_invoice` | NFe.io invoice `id` |
-| `nfeio.service_invoice.destroyed` | `destroy_service_invoice` | the cancelled `invoice_id` |
+| `nfeio.service_invoice.destroyed` | `destroy_service_invoice`, only after NFe.io reports `Cancelled` | the cancelled `invoice_id` |
 | `nfeio.company.ensured` | `ensure_company` | NFe.io company `id` |
 | `nfeio.webhook_subscription.ensured` | `ensure_webhook_subscription` | webhook `id` |
 | `nfeio.webhook_subscription.destroyed` | `destroy_webhook_subscription` | webhook `id` |
