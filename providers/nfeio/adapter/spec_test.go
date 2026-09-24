@@ -13,8 +13,8 @@ func TestSpec_Constants(t *testing.T) {
 	if IntegrationType != "nfeio" {
 		t.Fatalf("IntegrationType = %q; want nfeio", IntegrationType)
 	}
-	if AdapterVersion != "3.1.2" {
-		t.Fatalf("AdapterVersion = %q; want 3.1.2 for canonical credential schema keys", AdapterVersion)
+	if AdapterVersion != "3.2.0" {
+		t.Fatalf("AdapterVersion = %q; want 3.2.0 for per-call event instance and the bearer split", AdapterVersion)
 	}
 }
 

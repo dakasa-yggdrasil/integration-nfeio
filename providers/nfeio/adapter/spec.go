@@ -108,7 +108,7 @@ const (
 // AdapterVersion is the single source for the version advertised by the
 // running adapter. Release builds override this variable with the same value
 // read from this source file so the image identity and Describe stay aligned.
-var AdapterVersion = "3.1.2"
+var AdapterVersion = "3.2.0"
 
 // SupportedExecuteOperations lists the operations callable via the execute
 // RPC path. The reactor (nfse_webhook_received) is intentionally excluded —
