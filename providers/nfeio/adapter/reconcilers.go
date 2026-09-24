@@ -60,11 +60,20 @@ func (r *serviceInvoiceReconciler) Observe(ctx context.Context, filter map[strin
 	return out.Items, out.Cursor, nil
 }
 
+// Destroy cancels the invoice named by ref under the instance default company.
 func (r *serviceInvoiceReconciler) Destroy(ctx context.Context, ref string) error {
+	return r.DestroyWithDesired(ctx, ref, serviceInvoiceDesired{})
+}
+
+// DestroyWithDesired is preferred by the SDK dispatch. It cancels the invoice
+// named by ref under desired.CompanyID (the documented company_id input) and
+// falls back to the instance default company when that is empty. The
+// ExecuteHandler bridge copies the documented invoice_id input to ref.
+func (r *serviceInvoiceReconciler) DestroyWithDesired(ctx context.Context, ref string, desired serviceInvoiceDesired) error {
 	if ref == "" {
 		return fmt.Errorf("destroy_service_invoice: ref (invoice_id) required")
 	}
-	_, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{InvoiceID: ref})
+	_, err := CancelNFSe(ctx, r.cli, CancelNFSeInput{CompanyID: desired.CompanyID, InvoiceID: ref})
 	return err
 }
 

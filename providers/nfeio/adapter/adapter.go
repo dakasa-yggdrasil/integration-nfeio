@@ -51,7 +51,7 @@ func ExecuteHandler(
 ) sdkadapter.Handler {
 	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
 		sdkDelivery := d
-		sdkDelivery.Body = withEnvelopeInstance(d.Body)
+		sdkDelivery.Body = withServiceInvoiceDestroyRef(withEnvelopeInstance(d.Body))
 		body, _, dispatchErr := reconcile.Dispatch(ctx, a, sdkDelivery)
 		if dispatchErr == nil {
 			return body, "application/json", nil
@@ -129,6 +129,62 @@ func withEnvelopeInstance(body []byte) []byte {
 		return body
 	}
 	return out
+}
+
+// withServiceInvoiceDestroyRef copies input.invoice_id to input.ref for
+// destroy_service_invoice only, when ref is absent. The documented input is
+// {invoice_id[, company_id]}, but the SDK destroy path looks for ref,
+// service_invoice_id or id. Without the copy it inferred an empty ref, the
+// cancel failed, and nfeio.service_invoice.destroyed never fired. Every
+// other operation, and a body that needs no change, is returned unchanged.
+func withServiceInvoiceDestroyRef(body []byte) []byte {
+	var env map[string]json.RawMessage
+	if err := json.Unmarshal(body, &env); err != nil || env == nil {
+		return body
+	}
+	if envelopeOperation(env) != OpDestroyServiceInvoice {
+		return body
+	}
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(env["input"], &input); err != nil || input == nil {
+		return body
+	}
+	if !rawFieldAbsent(input["ref"]) {
+		return body
+	}
+	var invoiceID string
+	if err := json.Unmarshal(input["invoice_id"], &invoiceID); err != nil || strings.TrimSpace(invoiceID) == "" {
+		return body
+	}
+	encodedRef, err := json.Marshal(invoiceID)
+	if err != nil {
+		return body
+	}
+	input["ref"] = encodedRef
+	encodedInput, err := json.Marshal(input)
+	if err != nil {
+		return body
+	}
+	env["input"] = encodedInput
+	out, err := json.Marshal(env)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// envelopeOperation mirrors the SDK dispatch: operation wins, capability is
+// the fallback.
+func envelopeOperation(env map[string]json.RawMessage) string {
+	for _, key := range []string{"operation", "capability"} {
+		var op string
+		if json.Unmarshal(env[key], &op) == nil {
+			if op = strings.TrimSpace(op); op != "" {
+				return op
+			}
+		}
+	}
+	return ""
 }
 
 // rawFieldAbsent reports whether a top-level envelope field carries no
