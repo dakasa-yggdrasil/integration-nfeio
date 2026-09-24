@@ -290,4 +290,3 @@ destroy on the three reconciled resources. It posts to `yggdrasil-core`
   `insecure_ssl`, never provider secrets.
 - `destroy_company` always fails (NFe.io has no delete) and `bulk_issue`,
   observes and helpers are not reconciler mutations, so none of them emit.
-</content>

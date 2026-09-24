@@ -137,4 +137,3 @@ accepts only a legacy normalized body and must remain unexposed from NFe.io.
   template with no network call.
 
 See [CAPABILITIES.md](./CAPABILITIES.md) for every input/output schema.
-</content>

@@ -116,4 +116,3 @@ adapter's own event publish token Secret). `WEBHOOK_PORT`,
 
 - Per-capability input/output: [CAPABILITIES.md](./CAPABILITIES.md).
 - Health, metrics, webhook runbook: [OPERATIONS.md](./OPERATIONS.md).
-</content>

@@ -115,4 +115,3 @@ WARNs.
 
 - Env vars and ports: [CONFIGURATION.md](./CONFIGURATION.md).
 - Reactor pipeline detail: [CAPABILITIES.md](./CAPABILITIES.md#reactor-nfse_webhook_received).
-</content>

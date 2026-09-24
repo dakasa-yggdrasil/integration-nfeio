@@ -257,5 +257,3 @@ Repo layout, the describe/execute contract, and `pkg/contractcheck` are covered 
 ## License
 
 [Apache-2.0](./LICENSE).
-</content>
-</invoke>

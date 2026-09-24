@@ -131,4 +131,3 @@ docs in the same change.
 | `yggdrasil-sdk-go` | v0.9.1 |
 | Adapter version (`Describe()`) | 3.2.0 |
 | Transports | `http_json` (default), `amqp` |
-</content>
