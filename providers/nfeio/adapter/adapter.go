@@ -132,11 +132,13 @@ func withEnvelopeInstance(body []byte) []byte {
 }
 
 // withServiceInvoiceDestroyRef copies input.invoice_id to input.ref for
-// destroy_service_invoice only, when ref is absent. The documented input is
-// {invoice_id[, company_id]}, but the SDK destroy path looks for ref,
-// service_invoice_id or id. Without the copy it inferred an empty ref, the
-// cancel failed, and nfeio.service_invoice.destroyed never fired. Every
-// other operation, and a body that needs no change, is returned unchanged.
+// destroy_service_invoice only. The documented input is
+// {invoice_id[, company_id]}, but the SDK destroy path infers the ref from
+// ref, service_invoice_id or id, in that order. Without the copy it inferred
+// an empty ref, the cancel failed, and nfeio.service_invoice.destroyed never
+// fired. The copy happens only when none of those three keys carries a value,
+// so a caller that already sends one keeps the SDK's precedence. Every other
+// operation, and a body that needs no change, is returned unchanged.
 func withServiceInvoiceDestroyRef(body []byte) []byte {
 	var env map[string]json.RawMessage
 	if err := json.Unmarshal(body, &env); err != nil || env == nil {
@@ -149,8 +151,10 @@ func withServiceInvoiceDestroyRef(body []byte) []byte {
 	if err := json.Unmarshal(env["input"], &input); err != nil || input == nil {
 		return body
 	}
-	if !rawFieldAbsent(input["ref"]) {
-		return body
+	for _, key := range []string{"ref", "service_invoice_id", "id"} {
+		if !rawFieldAbsent(input[key]) {
+			return body
+		}
 	}
 	var invoiceID string
 	if err := json.Unmarshal(input["invoice_id"], &invoiceID); err != nil || strings.TrimSpace(invoiceID) == "" {

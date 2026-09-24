@@ -70,6 +70,29 @@ func TestExecuteHandler_DestroyServiceInvoiceDocumentedInput(t *testing.T) {
 	}
 }
 
+func TestExecuteHandler_DestroyServiceInvoiceKeepsCallerIDPrecedence(t *testing.T) {
+	var gotPath string
+	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"status":"Cancelled","flowMessage":""}`))
+	})
+	defer srv.Close()
+	handler, emitter := newCapturingHandler(t, srv.URL)
+
+	body := coreEnvelope(t, OpDestroyServiceInvoice,
+		map[string]any{"id": "inv-by-id", "invoice_id": "inv-other"},
+		"nfeio-dakasa-production", "")
+	if _, _, err := handler(context.Background(), rpc.Delivery{Body: body}); err != nil {
+		t.Fatalf("destroy_service_invoice with {id, invoice_id}: %v", err)
+	}
+	if gotPath != "/v2/companies/cmpDefault/serviceinvoices/inv-by-id/cancel" {
+		t.Fatalf("cancel path = %q; want the caller's id to keep precedence over invoice_id", gotPath)
+	}
+	if len(emitter.events) != 1 || emitter.events[0].ResourceID != "inv-by-id" {
+		t.Fatalf("events = %+v; want one destroyed event for inv-by-id", emitter.events)
+	}
+}
+
 func TestExecuteHandler_DestroyServiceInvoicePendingCancelIsRetryableAndSilent(t *testing.T) {
 	var calls int
 	srv := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +162,8 @@ func TestWithServiceInvoiceDestroyRef_OnlyFillsAbsentRefForDestroy(t *testing.T)
 		`{"operation":"retrieve_pdf","input":{"invoice_id":"inv-1"}}`,
 		`{"operation":"destroy_webhook_subscription","input":{"id":"wh-1","confirm_id":"wh-1"}}`,
 		`{"operation":"destroy_service_invoice","input":{"ref":"inv-explicit","invoice_id":"inv-other"}}`,
+		`{"operation":"destroy_service_invoice","input":{"service_invoice_id":"inv-explicit","invoice_id":"inv-other"}}`,
+		`{"operation":"destroy_service_invoice","input":{"id":"inv-explicit","invoice_id":"inv-other"}}`,
 		`{"operation":"destroy_service_invoice","input":{"company_id":"cmp-1"}}`,
 		`{"operation":"destroy_service_invoice"}`,
 		`not json`,
@@ -149,14 +174,15 @@ func TestWithServiceInvoiceDestroyRef_OnlyFillsAbsentRefForDestroy(t *testing.T)
 		}
 	}
 
-	out := withServiceInvoiceDestroyRef([]byte(`{"capability":"destroy_service_invoice","input":{"invoice_id":"inv-2","company_id":"cmp-1"}}`))
+	// Empty values do not count as a caller-supplied ref.
+	out := withServiceInvoiceDestroyRef([]byte(`{"capability":"destroy_service_invoice","input":{"invoice_id":"inv-2","company_id":"cmp-1","ref":"","id":null}}`))
 	var got struct {
 		Input map[string]any `json:"input"`
 	}
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	want := map[string]any{"invoice_id": "inv-2", "company_id": "cmp-1", "ref": "inv-2"}
+	want := map[string]any{"invoice_id": "inv-2", "company_id": "cmp-1", "ref": "inv-2", "id": nil}
 	if !reflect.DeepEqual(got.Input, want) {
 		t.Fatalf("input = %v; want %v", got.Input, want)
 	}
