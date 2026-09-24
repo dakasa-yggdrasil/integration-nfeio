@@ -87,11 +87,9 @@ credential set it was started with. DaKasa therefore grants the adapter's event
 principal only `nfeio-dakasa-production`, and Core refuses events that name any
 other instance or carry an empty `instance_id`.
 
-**Prerequisite for DaKasa production (not in place yet).** The live Deployment
-does not carry this wiring: its `YGGDRASIL_RUN_TOKEN` is the shared
-workflow-run token, which Core does not accept on `/api/v1/events`, so every
-event is refused today. Two dakasa-system changes must land before this
-adapter's events are accepted:
+**What DaKasa production needs for its events to be accepted.** Core accepts
+`/api/v1/events` only from an event publisher principal, never from the shared
+workflow-run token, so both of these live in dakasa-system:
 
 1. An event publisher principal for this adapter in Core, with its own token
    Secret, granted the five `nfeio.*` event types on `nfeio-dakasa-production`
