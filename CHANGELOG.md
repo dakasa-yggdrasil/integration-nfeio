@@ -1,5 +1,52 @@
 # Changelog
 
+## v3.2.0 - 2026-09-24
+
+### Fixed
+
+- Mutation events now carry a real `instance_id`. The execute handler lifts
+  Core's per-call `integration.instance.name` to the envelope's top-level
+  `instance_id`, and `metadata.idempotency` to `idempotency`, each only when
+  the envelope does not already set it. Every event from one Deployment
+  names the instance Core invoked (for example `nfeio-dakasa-production` or
+  `nfeio-dakasa-validation`). The lift never modifies capability `input`,
+  so the strict webhook_subscription decoders are unaffected. An envelope without
+  an instance name still yields an empty `instance_id`, which Core refuses
+  (fail closed); there is no static fallback label.
+- `destroy_service_invoice` now accepts its documented `{invoice_id}`
+  input. The SDK destroy path only inferred the ref from `ref`,
+  `service_invoice_id` or `id`, so the documented input produced an empty
+  ref, the cancel failed and `nfeio.service_invoice.destroyed` never fired.
+  The execute bridge now copies `invoice_id` to `input.ref` for this
+  operation only, and the cancel honours the caller's `company_id` instead
+  of always using the instance default.
+
+### Security
+
+- Split the two Core bearers. `YGGDRASIL_RUN_TOKEN` is now only the
+  adapter's own event publisher bearer (ADR-0279), read by the SDK emitter
+  together with `YGGDRASIL_CORE_URL` for `POST /api/v1/events`.
+- The legacy webhook publish dispatcher reads its own pair,
+  `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN`, and no longer
+  falls back to `http://yggdrasil-core:9080`. It is disabled unless both are
+  set; the adapter then logs a WARN at startup and the listener logs and
+  drops events. The dispatcher posts to `/api/v1/capabilities/invoke`, a
+  route Core does not have, so enabling it only produces 404s.
+
+### Operations
+
+- Production Deployment env after this release:
+  `YGGDRASIL_CORE_URL` (literal Core Service URL) and `YGGDRASIL_RUN_TOKEN`
+  (the adapter's own event publish token Secret). `WEBHOOK_PORT`,
+  `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` must stay
+  absent.
+- Emitted event types: `nfeio.service_invoice.ensured`,
+  `nfeio.service_invoice.destroyed`, `nfeio.company.ensured`,
+  `nfeio.webhook_subscription.ensured` and
+  `nfeio.webhook_subscription.destroyed`.
+- After rolling the new image, Core rejects executes with `version_mismatch`
+  until `manifest_sync` re-describes the adapter (about one cycle).
+
 ## v3.1.2 - 2026-09-06
 
 ### Fixed

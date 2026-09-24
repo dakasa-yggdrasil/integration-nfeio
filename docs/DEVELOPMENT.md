@@ -129,6 +129,6 @@ docs in the same change.
 |---|---|
 | Go | 1.25 |
 | `yggdrasil-sdk-go` | v0.9.1 |
-| Adapter version (`Describe()`) | 3.1.2 |
+| Adapter version (`Describe()`) | 3.2.0 |
 | Transports | `http_json` (default), `amqp` |
 </content>

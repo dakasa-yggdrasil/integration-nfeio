@@ -78,7 +78,12 @@ Cancel an emitted NFSe. `PUT /v2/companies/{id}/serviceinvoices/{invoice_id}/can
 A 422 `cancellation_window_closed` is **terminal** (compensate, don't retry); a 404
 is treated as already-absent success.
 
-- **Required input:** `invoice_id`. **Optional:** `company_id`.
+- **Required input:** `invoice_id`. **Optional:** `company_id` (defaults to the
+  instance `NFEIO_COMPANY_ID`).
+- **Output:** `{"deleted": true}`. Emits `nfeio.service_invoice.destroyed` with
+  `resource_id` equal to the invoice id. The execute bridge copies `invoice_id`
+  to `ref` for this operation when `ref` is absent (v3.2.0); before that the
+  documented input failed with an empty ref.
 
 ### `retrieve_pdf`
 `GET /v2/companies/{id}/serviceinvoices/{invoice_id}/pdf` → signed S3 download URL
@@ -244,6 +249,9 @@ Pipeline (see `providers/nfeio/adapter/webhook_server.go`):
 4. Map the normalized state to a queue and publish the raw body via the
    `publish_message` capability on the `rabbitmq-topology` instance, routed through
    `yggdrasil-core` (`POST /api/v1/capabilities/invoke`). Success → `202 Accepted`.
+   Core has no such route, so the publish dispatcher is disabled unless
+   `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are both set;
+   while disabled the listener logs and drops the event.
    Unknown event → `202` (logged, not enqueued — avoids an NFe.io retry storm).
 
 | Normalized status | Target queue |
@@ -254,4 +262,32 @@ Pipeline (see `providers/nfeio/adapter/webhook_server.go`):
 
 See the sequence diagram in the [README](../README.md#webhooks--reactors) and the
 [webhook runbook](./OPERATIONS.md#webhook-runbook).
+
+---
+
+## Mutation events
+
+The SDK reconcile dispatch emits one event after every successful ensure or
+destroy on the three reconciled resources. It posts to `yggdrasil-core`
+`POST /api/v1/events` when `YGGDRASIL_CORE_URL` is set, with
+`YGGDRASIL_RUN_TOKEN` as the bearer, and never fails the capability call.
+
+| Event type | Capability | `resource_id` |
+|---|---|---|
+| `nfeio.service_invoice.ensured` | `ensure_service_invoice` | NFe.io invoice `id` |
+| `nfeio.service_invoice.destroyed` | `destroy_service_invoice` | the cancelled invoice id |
+| `nfeio.company.ensured` | `ensure_company` | NFe.io company `id` |
+| `nfeio.webhook_subscription.ensured` | `ensure_webhook_subscription` | webhook `id` |
+| `nfeio.webhook_subscription.destroyed` | `destroy_webhook_subscription` | webhook `id` |
+
+- `instance_id` is the per-call `integration.instance.name` from Core's
+  execute envelope, lifted to the top-level `instance_id` without touching
+  `input`. An envelope without it yields an empty `instance_id`, which Core
+  refuses.
+- `idempotency` is Core's `metadata.idempotency` when present; otherwise the
+  SDK synthesizes one.
+- `observed` is the capability output. Webhook events carry only `id` and
+  `insecure_ssl`, never provider secrets.
+- `destroy_company` always fails (NFe.io has no delete) and `bulk_issue`,
+  observes and helpers are not reconciler mutations, so none of them emit.
 </content>
