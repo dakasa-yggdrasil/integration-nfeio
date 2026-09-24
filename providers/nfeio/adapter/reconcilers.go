@@ -206,11 +206,12 @@ func wireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*M
 // newEmitterFromEnv returns an events.Emitter wired to yggdrasil-core
 // when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. The HTTP
 // emitter keeps the SDK defaults: it POSTs to YGGDRASIL_CORE_URL +
-// /api/v1/events with YGGDRASIL_RUN_TOKEN as the bearer. Env-driven
-// keeps the Lego principle (no
-// broker / secret-store / cloud is hardcoded). Emission is best-effort
-// per reconcile.WithEmitter docstring: failures log WARN but do not fail
-// the capability call.
+// /api/v1/events with YGGDRASIL_RUN_TOKEN as the bearer. That token is
+// this adapter's own event publisher credential; the legacy publish
+// dispatcher reads its own pair (PublishDispatcherFromEnv). Env-driven
+// keeps the Lego principle (no broker / secret-store / cloud is
+// hardcoded). Emission is best-effort per reconcile.WithEmitter
+// docstring: failures log WARN but do not fail the capability call.
 func newEmitterFromEnv() events.Emitter {
 	if os.Getenv(events.EnvCoreURL) == "" {
 		return &events.NoopEmitter{}

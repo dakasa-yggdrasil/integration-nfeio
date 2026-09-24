@@ -4,9 +4,11 @@
 //     describe + execute on /rpc/describe + /rpc/execute (port 8081 for
 //     HTTP, queue prefix yggdrasil.adapter.nfeio.* for AMQP).
 //  2. Health server (port 8080) — /healthz + /readyz + /metrics.
-//  3. Webhook server (port 8082) — inbound NFe.io callbacks; HMAC-verifies,
-//     dedupes, normalizes status, publishes to enterprise-payments.* via
-//     the publish_message capability on the rabbitmq-topology instance.
+//  3. Webhook server (port 8082): legacy normalized callbacks. HMAC-verifies,
+//     dedupes, normalizes status, and hands the event to a publisher. The
+//     publish dispatcher is disabled unless YGGDRASIL_CORE_BASE_URL and
+//     YGGDRASIL_WORKFLOW_RUN_TOKEN are both set; without it the event is
+//     logged and dropped.
 //
 // The adapter package's AdapterVersion is overridden at link time by:
 //
@@ -134,13 +136,21 @@ func main() {
 		}
 	}()
 
-	// 3) Webhook server — third listener for inbound NFe.io callbacks.
+	// 3) Webhook server: third listener, for legacy normalized callbacks.
+	// The publish dispatcher has its own URL and bearer pair and never reads
+	// YGGDRASIL_CORE_URL or YGGDRASIL_RUN_TOKEN, which belong to the
+	// mutation event emitter (YGGDRASIL_RUN_TOKEN is this adapter's own
+	// event publisher bearer). It targets /api/v1/capabilities/invoke, a
+	// route Core does not have, so it stays disabled unless both of its env
+	// vars are set.
 	webhookSrv := ad.NewWebhookServer(cfg, cli, logger)
-	coreURL := envOrDefault("YGGDRASIL_CORE_URL", "http://yggdrasil-core:9080")
 	instance := envOrDefault("RABBITMQ_TOPOLOGY_INSTANCE", "rabbitmq-topology-default")
-	token := os.Getenv("YGGDRASIL_RUN_TOKEN")
-	dispatcher := ad.NewPublishDispatcher(coreURL, instance, token, logger)
-	webhookSrv.SetPublisher(dispatcher.PublishMessage)
+	if dispatcher := ad.PublishDispatcherFromEnv(os.Getenv, instance, logger); dispatcher != nil {
+		webhookSrv.SetPublisher(dispatcher.PublishMessage)
+	} else {
+		logger.Warn("legacy webhook publish dispatcher disabled; webhook events are logged and dropped",
+			zap.String("requires", ad.EnvPublishCoreURL+" and "+ad.EnvPublishToken))
+	}
 	webhookCtx, cancelWebhook := context.WithCancel(context.Background())
 	defer cancelWebhook()
 	go func() {

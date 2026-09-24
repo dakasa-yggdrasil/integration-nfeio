@@ -5,21 +5,53 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
 )
 
+// The legacy webhook reactor's publish dispatcher reads its own env pair.
+// It never reads YGGDRASIL_CORE_URL or YGGDRASIL_RUN_TOKEN: those belong to
+// the mutation event emitter, and YGGDRASIL_RUN_TOKEN is this adapter's own
+// event publisher bearer.
+const (
+	// EnvPublishCoreURL is the Core base URL the dispatcher POSTs to. There
+	// is no default: when it is unset the dispatcher is disabled.
+	EnvPublishCoreURL = "YGGDRASIL_CORE_BASE_URL"
+	// EnvPublishToken is the bearer the dispatcher sends. When it is unset
+	// the dispatcher is disabled, so it never calls Core unauthenticated.
+	EnvPublishToken = "YGGDRASIL_WORKFLOW_RUN_TOKEN"
+)
+
 // PublishDispatcher invokes publish_message on the rabbitmq-topology
-// instance via the Yggdrasil core RPC bus. Instance reference comes from
-// the instance YAML (Task 30) and the auth token from YGGDRASIL_RUN_TOKEN
-// at startup.
+// instance through POST /api/v1/capabilities/invoke on yggdrasil-core.
+// Core has no such route, so an enabled dispatcher gets 404 on every
+// publish. It stays disabled unless both EnvPublishCoreURL and
+// EnvPublishToken are set (see PublishDispatcherFromEnv).
 type PublishDispatcher struct {
 	coreURL    string
 	instance   string
 	token      string
 	logger     *zap.Logger
 	httpClient *http.Client
+}
+
+// PublishDispatcherFromEnv builds the legacy reactor publish dispatcher from
+// EnvPublishCoreURL and EnvPublishToken. It returns nil, meaning disabled,
+// unless both are set. getenv defaults to os.Getenv; instance is the
+// rabbitmq-topology integration_instance name.
+func PublishDispatcherFromEnv(getenv func(string) string, instance string, logger *zap.Logger) *PublishDispatcher {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	coreURL := strings.TrimRight(strings.TrimSpace(getenv(EnvPublishCoreURL)), "/")
+	token := strings.TrimSpace(getenv(EnvPublishToken))
+	if coreURL == "" || token == "" {
+		return nil
+	}
+	return NewPublishDispatcher(coreURL, instance, token, logger)
 }
 
 // NewPublishDispatcher constructs a dispatcher pointing at yggdrasil-core.

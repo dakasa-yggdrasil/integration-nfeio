@@ -30,8 +30,8 @@ type WebhookServer struct {
 }
 
 // NewWebhookServer constructs the third listener. publisher defaults to a
-// no-op stub; main.go wires the real PublishDispatcher via SetPublisher
-// before Start.
+// no-op stub that logs and drops; main.go replaces it via SetPublisher only
+// when PublishDispatcherFromEnv returns a dispatcher.
 func NewWebhookServer(cfg *config.Config, cli *Client, logger *zap.Logger) *WebhookServer {
 	cache, _ := lru.New[string, time.Time](4096)
 	if logger == nil {
@@ -49,8 +49,9 @@ func NewWebhookServer(cfg *config.Config, cli *Client, logger *zap.Logger) *Webh
 	}
 }
 
-// SetPublisher injects the production publisher (typically a
-// PublishDispatcher that hits yggdrasil-core's capabilities/invoke).
+// SetPublisher injects the publisher, typically a PublishDispatcher that
+// POSTs to yggdrasil-core's /api/v1/capabilities/invoke (a route Core does
+// not have; see PublishDispatcher).
 func (s *WebhookServer) SetPublisher(p func(queue string, body []byte) error) {
 	if p != nil {
 		s.publisher = p
