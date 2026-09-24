@@ -163,13 +163,23 @@ func WireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*M
 
 // WireReconcilersWithInstance is the v0.6.0 variant accepting an
 // instanceID so emitted MutationEvents carry the multi-tenant scope.
-// Callers that already know the integration_instance label (e.g. the
-// hand-written executeRoute when migrated) should prefer this form.
-// When instanceID is empty, the SDK forwards an empty string into
-// MutationEvent.InstanceID and the receiver can fall back to any
-// envelope-scoped label.
+// instanceID is only the fallback: the SDK prefers the top-level
+// instance_id of each execute envelope, which ExecuteHandler lifts from
+// Core's integration.instance.name (withEnvelopeInstance). Production
+// passes "" so an envelope without an instance name yields an event with
+// an empty InstanceID, which Core refuses (fail closed). One Deployment
+// serves more than one integration instance, so a static label would
+// mislabel events from the other instance.
+//
+// The emitter comes from the environment (newEmitterFromEnv).
 func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string) {
-	emitter := newEmitterFromEnv()
+	wireReconcilers(a, cli, templates, instanceID, newEmitterFromEnv())
+}
+
+// wireReconcilers installs the reconcilers with an explicit emitter. It is
+// the test seam: tests pass a capturing emitter to assert on the
+// MutationEvents the SDK emits through the production ExecuteHandler.
+func wireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string, emitter events.Emitter) {
 	commonOpts := []reconcile.Option{
 		reconcile.WithProvider(Provider),
 		reconcile.WithEmitter(emitter),
@@ -194,10 +204,13 @@ func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates m
 }
 
 // newEmitterFromEnv returns an events.Emitter wired to yggdrasil-core
-// when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. Env-driven
-// keeps the Lego principle (no broker / secret-store / cloud is
-// hardcoded). Emission is best-effort per reconcile.WithEmitter
-// docstring — failures log WARN but do not fail the capability call.
+// when YGGDRASIL_CORE_URL is set, otherwise a NoopEmitter. The HTTP
+// emitter keeps the SDK defaults: it POSTs to YGGDRASIL_CORE_URL +
+// /api/v1/events with YGGDRASIL_RUN_TOKEN as the bearer. Env-driven
+// keeps the Lego principle (no
+// broker / secret-store / cloud is hardcoded). Emission is best-effort
+// per reconcile.WithEmitter docstring: failures log WARN but do not fail
+// the capability call.
 func newEmitterFromEnv() events.Emitter {
 	if os.Getenv(events.EnvCoreURL) == "" {
 		return &events.NoopEmitter{}

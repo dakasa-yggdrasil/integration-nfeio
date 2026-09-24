@@ -98,9 +98,12 @@ func main() {
 	// back to executeRoute for ops outside the
 	// ensure_/observe_/destroy_ triples — retrieve_pdf, retrieve_xml,
 	// manage_template, bulk_issue, calculate_iss and observe_municipalities
-	// (cache-backed, not a Reconciler). instanceID is left empty here;
-	// emitted MutationEvents carry an empty InstanceID and the receiver
-	// falls back to the envelope-scoped label.
+	// (cache-backed, not a Reconciler). The static instanceID stays empty
+	// on purpose: ExecuteHandler lifts Core's integration.instance.name
+	// into each envelope, and the SDK prefers that per-call name. One
+	// Deployment serves several integration instances, so a static label
+	// would mislabel events. An envelope without an instance name yields
+	// an event with an empty instance_id, which Core refuses (fail closed).
 	ad.WireReconcilersWithInstance(a, cli, templates, "")
 
 	a.Register("describe", ad.DescribeHandler(logger)).

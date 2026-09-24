@@ -36,6 +36,12 @@ func DescribeHandler(logger *zap.Logger) sdkadapter.Handler {
 // fall back to executeRoute. The reactor
 // (nfse_webhook_received) is intentionally NOT routed here — it is
 // triggered exclusively by the webhook HTTP server.
+//
+// Since v3.2.0 the dispatch path receives a copy of the delivery whose
+// body carries Core's per-call instance name and idempotency key at the
+// top level (see withEnvelopeInstance), so every mutation event names
+// the integration instance that Core actually invoked. The executeRoute
+// fallback keeps the original body.
 func ExecuteHandler(
 	logger *zap.Logger,
 	a *sdkadapter.Adapter,
@@ -44,7 +50,9 @@ func ExecuteHandler(
 	deps *ExecuteDeps,
 ) sdkadapter.Handler {
 	return func(ctx context.Context, d rpc.Delivery) ([]byte, string, error) {
-		body, _, dispatchErr := reconcile.Dispatch(ctx, a, d)
+		sdkDelivery := d
+		sdkDelivery.Body = withEnvelopeInstance(d.Body)
+		body, _, dispatchErr := reconcile.Dispatch(ctx, a, sdkDelivery)
 		if dispatchErr == nil {
 			return body, "application/json", nil
 		}
@@ -60,6 +68,74 @@ func ExecuteHandler(
 		}
 		return body, "application/json", nil
 	}
+}
+
+// withEnvelopeInstance lifts Core's per-call identity onto the top-level
+// fields the SDK reconcile dispatch reads for mutation events:
+//
+//   - instance_id  from integration.instance.name
+//   - idempotency  from metadata.idempotency
+//
+// Each field is set only when the envelope does not already carry a
+// value for it (missing, null or ""). When Core sends no instance name,
+// instance_id stays empty and Core refuses the event, which fails closed
+// instead of guessing a label that could belong to another instance.
+//
+// The input object is never touched: the webhook_subscription decoders
+// reject any unknown key that does not start with "__". A body that is
+// not a JSON object, or that needs no change, is returned unchanged.
+func withEnvelopeInstance(body []byte) []byte {
+	var env map[string]json.RawMessage
+	if err := json.Unmarshal(body, &env); err != nil || env == nil {
+		return body
+	}
+	changed := false
+	if rawFieldAbsent(env["instance_id"]) {
+		var integration struct {
+			Instance struct {
+				Name string `json:"name"`
+			} `json:"instance"`
+		}
+		if raw, ok := env["integration"]; ok && json.Unmarshal(raw, &integration) == nil {
+			if name := strings.TrimSpace(integration.Instance.Name); name != "" {
+				if encoded, err := json.Marshal(name); err == nil {
+					env["instance_id"] = encoded
+					changed = true
+				}
+			}
+		}
+	}
+	if rawFieldAbsent(env["idempotency"]) {
+		var metadata struct {
+			Idempotency json.RawMessage `json:"idempotency"`
+		}
+		if raw, ok := env["metadata"]; ok && json.Unmarshal(raw, &metadata) == nil {
+			var key string
+			if json.Unmarshal(metadata.Idempotency, &key) == nil {
+				if key = strings.TrimSpace(key); key != "" {
+					if encoded, err := json.Marshal(key); err == nil {
+						env["idempotency"] = encoded
+						changed = true
+					}
+				}
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	out, err := json.Marshal(env)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+// rawFieldAbsent reports whether a top-level envelope field carries no
+// value: missing, JSON null, or the empty string.
+func rawFieldAbsent(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed == "" || trimmed == "null" || trimmed == `""`
 }
 
 // isUnsupportedReconcileOp matches the SDK's "unsupported operation"
