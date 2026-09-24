@@ -77,7 +77,7 @@ func TestExecuteHandler_EventInstanceComesFromCoreEnvelopePerCall(t *testing.T) 
 		idempotency string
 	}{
 		{instance: "nfeio-dakasa-production", idempotency: "idem-production-1"},
-		{instance: "nfeio-dakasa-validation", idempotency: "idem-validation-1"},
+		{instance: "nfeio-synthetic-second", idempotency: "idem-second-1"},
 	}
 	for _, call := range calls {
 		body := coreEnvelope(t, OpEnsureCompany, companyInput(), call.instance, call.idempotency)

@@ -102,10 +102,11 @@ func main() {
 	// manage_template, bulk_issue, calculate_iss and observe_municipalities
 	// (cache-backed, not a Reconciler). The static instanceID stays empty
 	// on purpose: ExecuteHandler lifts Core's integration.instance.name
-	// into each envelope, and the SDK prefers that per-call name. One
-	// Deployment serves several integration instances, so a static label
-	// would mislabel events. An envelope without an instance name yields
-	// an event with an empty instance_id, which Core refuses (fail closed).
+	// into each envelope, and the SDK prefers that per-call name. The
+	// adapter serves every envelope with its one NFe.io credential set, so
+	// the Core event principal grants only the production instance and
+	// Core refuses events naming any other instance. An envelope without an
+	// instance name yields an empty instance_id, which Core also refuses.
 	ad.WireReconcilersWithInstance(a, cli, templates, "")
 
 	a.Register("describe", ad.DescribeHandler(logger)).

@@ -239,9 +239,11 @@ func WireReconcilers(a *sdkadapter.Adapter, cli *Client, templates map[string]*M
 // instance_id of each execute envelope, which ExecuteHandler lifts from
 // Core's integration.instance.name (withEnvelopeInstance). Production
 // passes "" so an envelope without an instance name yields an event with
-// an empty InstanceID, which Core refuses (fail closed). One Deployment
-// serves more than one integration instance, so a static label would
-// mislabel events from the other instance.
+// an empty InstanceID, which Core refuses (fail closed). The adapter does
+// not bind the envelope's instance to its credentials: it serves every
+// envelope with its one NFe.io credential set. Core's event principal
+// grants only the production instance, so events naming another instance
+// are refused.
 //
 // The emitter comes from the environment (newEmitterFromEnv).
 func WireReconcilersWithInstance(a *sdkadapter.Adapter, cli *Client, templates map[string]*MunicipioTemplate, instanceID string) {

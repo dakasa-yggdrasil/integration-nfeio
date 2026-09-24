@@ -282,8 +282,10 @@ destroy on the three reconciled resources. It posts to `yggdrasil-core`
 
 - `instance_id` is the per-call `integration.instance.name` from Core's
   execute envelope, lifted to the top-level `instance_id` without touching
-  `input`. An envelope without it yields an empty `instance_id`, which Core
-  refuses.
+  `input`. The adapter serves every envelope with its one NFe.io credential
+  set, so DaKasa grants its event principal only `nfeio-dakasa-production`
+  and Core refuses events naming any other instance. An envelope without an
+  instance name yields an empty `instance_id`, which Core also refuses.
 - `idempotency` is Core's `metadata.idempotency` when present; otherwise the
   SDK synthesizes one.
 - `observed` is the capability output. Webhook events carry only `id` and

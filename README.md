@@ -109,10 +109,12 @@ refused event logs a WARN and never fails the capability call.
 | `nfeio.webhook_subscription.destroyed` | `destroy_webhook_subscription` | webhook `id` |
 
 `instance_id` is the per-call `integration.instance.name` from Core's execute
-envelope (for DaKasa, `nfeio-dakasa-production` or `nfeio-dakasa-validation`),
-so one Deployment labels each event with the instance Core invoked. There is
-no static fallback: an envelope without an instance name yields an empty
-`instance_id`, which Core refuses. `destroy_company` is not supported by
+envelope. The adapter does not bind that name to its credentials: it serves
+every envelope with the one NFe.io credential set it was started with. DaKasa
+therefore grants the adapter's event principal only `nfeio-dakasa-production`,
+and Core refuses events that name any other instance. There is no static
+fallback: an envelope without an instance name yields an empty `instance_id`,
+which Core also refuses. `destroy_company` is not supported by
 NFe.io and `bulk_issue` is an action, so neither emits.
 
 ## Quick start

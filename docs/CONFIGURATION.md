@@ -81,9 +81,11 @@ dispatcher only gets 404. Keep it disabled. With it disabled the adapter logs a
 WARN at startup and the legacy listener logs and drops each event.
 
 Each mutation event carries `instance_id` from Core's per-call
-`integration.instance.name`. There is no env var for it: one Deployment serves
-several integration instances, and an envelope without an instance name yields
-an empty `instance_id`, which Core refuses.
+`integration.instance.name`. There is no env var for it. The adapter does not
+bind that name to its credentials: it serves every envelope with the one NFe.io
+credential set it was started with. DaKasa therefore grants the adapter's event
+principal only `nfeio-dakasa-production`, and Core refuses events that name any
+other instance or carry an empty `instance_id`.
 
 DaKasa production carries `YGGDRASIL_CORE_URL` and `YGGDRASIL_RUN_TOKEN` (the
 adapter's own event publish token Secret). `WEBHOOK_PORT`,

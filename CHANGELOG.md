@@ -7,12 +7,15 @@
 - Mutation events now carry a real `instance_id`. The execute handler lifts
   Core's per-call `integration.instance.name` to the envelope's top-level
   `instance_id`, and `metadata.idempotency` to `idempotency`, each only when
-  the envelope does not already set it. Every event from one Deployment
-  names the instance Core invoked (for example `nfeio-dakasa-production` or
-  `nfeio-dakasa-validation`). The lift never modifies capability `input`,
+  the envelope does not already set it. The lift never modifies capability `input`,
   so the strict webhook_subscription decoders are unaffected. An envelope without
   an instance name still yields an empty `instance_id`, which Core refuses
   (fail closed); there is no static fallback label.
+- The adapter does not bind the envelope's instance to its credentials: it
+  serves every envelope with the one NFe.io credential set it was started
+  with. DaKasa therefore grants the adapter's event principal only
+  `nfeio-dakasa-production`, and Core refuses events that name any other
+  instance.
 - `destroy_service_invoice` now accepts its documented `{invoice_id}`
   input. The SDK destroy path only inferred the ref from `ref`,
   `service_invoice_id` or `id`, so the documented input produced an empty

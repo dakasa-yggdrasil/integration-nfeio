@@ -85,15 +85,18 @@ expected state. The dispatcher never reads `YGGDRASIL_CORE_URL` or
 
 With `YGGDRASIL_CORE_URL` set, every successful ensure or destroy through the
 reconcilers posts an event to `POST /api/v1/events` with `YGGDRASIL_RUN_TOKEN`
-as the bearer. `instance_id` is Core's per-call `integration.instance.name`
-(`nfeio-dakasa-production` or `nfeio-dakasa-validation` for DaKasa), and
+as the bearer. `instance_id` is Core's per-call `integration.instance.name`.
+The adapter serves every envelope with its one NFe.io credential set, so only
+`nfeio-dakasa-production` is granted to its event principal and Core refuses
+events naming any other instance. An execute that names another instance
+still runs against the production credentials; only its event is refused.
 `idempotency` is Core's `metadata.idempotency` when present. Emission is best
 effort, so a refused event only shows up as an adapter WARN:
 
 | Log line | Cause | Action |
 |---|---|---|
 | `reconcile: emit "nfeio.<resource>.<verb>" failed ... terminal status 401` | Core does not accept the bearer | Check that `YGGDRASIL_RUN_TOKEN` is the adapter's own event publish token. |
-| `... terminal status 403` | The publisher has no grant for this event type and instance, or the envelope carried no `integration.instance.name` (empty `instance_id`) | Check the principal grants in Core. An empty instance is the expected fail-closed result; fix the caller, not the adapter. |
+| `... terminal status 403` | The publisher has no grant for this event type and instance: the envelope named an instance other than `nfeio-dakasa-production`, or carried no `integration.instance.name` (empty `instance_id`) | Check the principal grants in Core and the calling workflow's instance. Both refusals are the expected fail-closed result; fix the caller, not the adapter. |
 | `... terminal status 400` | A required event field was empty or malformed | Read the problem detail in the WARN. |
 | `events: noop emitter suppressed mutation event` | `YGGDRASIL_CORE_URL` is unset | Set it to the Core Service URL. |
 
