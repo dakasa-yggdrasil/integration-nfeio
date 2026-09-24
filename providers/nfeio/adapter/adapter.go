@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	sdkadapter "github.com/dakasa-yggdrasil/yggdrasil-sdk-go/adapter"
@@ -465,7 +466,7 @@ func IssueNFSe(ctx context.Context, cli *Client, templates map[string]*Municipio
 	}
 
 	out := &IssueNFSeOutput{}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", companyID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", pathSegment(companyID))
 	err := cli.do(ctx, http.MethodPost, path, body, out)
 	if err == nil {
 		return out, nil
@@ -537,7 +538,7 @@ func ObserveServiceInvoices(ctx context.Context, cli *Client, raw []byte) (*Obse
 	// List path. NFe.io paginates server-side; the response carries items
 	// + an optional cursor in the meta envelope. We mirror that to the
 	// caller verbatim so downstream pagination follows the same shape.
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", companyID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices", pathSegment(companyID))
 	if in.Cursor != "" {
 		path += "?cursor=" + in.Cursor
 	}
@@ -571,7 +572,7 @@ func GetNFSeStatus(ctx context.Context, cli *Client, in GetNFSeStatusInput) (*Is
 		return nil, errors.New("company_id required (no instance default)")
 	}
 	out := &IssueNFSeOutput{}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s", companyID, in.InvoiceID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s", pathSegment(companyID), pathSegment(in.InvoiceID))
 	if err := cli.do(ctx, http.MethodGet, path, nil, out); err != nil {
 		return nil, err
 	}
@@ -607,7 +608,7 @@ func CancelNFSe(ctx context.Context, cli *Client, in CancelNFSeInput) (*CancelNF
 		Status      string `json:"status"`
 		FlowMessage string `json:"flowMessage"`
 	}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/cancel", companyID, in.InvoiceID)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/cancel", pathSegment(companyID), pathSegment(in.InvoiceID))
 	if err := cli.do(ctx, http.MethodPut, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -655,7 +656,7 @@ func retrieveDoc(ctx context.Context, cli *Client, in RetrieveDocInput, kind str
 		DocumentURL string `json:"documentUrl"`
 		ExpiresAt   string `json:"expiresAt"`
 	}
-	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/%s", companyID, in.InvoiceID, kind)
+	path := fmt.Sprintf("/v2/companies/%s/serviceinvoices/%s/%s", pathSegment(companyID), pathSegment(in.InvoiceID), kind)
 	if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
 		return nil, err
 	}
@@ -746,6 +747,13 @@ func RegisterCompany(ctx context.Context, cli *Client, in RegisterCompanyInput) 
 	return nil, err
 }
 
+// pathSegment escapes one caller-supplied value (a company or invoice id) as a
+// single NFe.io URL path segment, so a "/", "?" or "#" in the value can never
+// add path segments, a query or a fragment to the request.
+func pathSegment(value string) string {
+	return url.PathEscape(value)
+}
+
 func firstNonEmpty(vals ...string) string {
 	for _, v := range vals {
 		if v != "" {
@@ -804,7 +812,7 @@ func ObserveCompanies(ctx context.Context, cli *Client, raw []byte) (*ObserveCom
 			Name             string `json:"name"`
 			Status           string `json:"status"`
 		}
-		path := fmt.Sprintf("/v2/companies/%s", in.ID)
+		path := fmt.Sprintf("/v2/companies/%s", pathSegment(in.ID))
 		if err := cli.do(ctx, http.MethodGet, path, nil, &raw); err != nil {
 			return nil, err
 		}
