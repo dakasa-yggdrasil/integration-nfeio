@@ -158,6 +158,7 @@ spec:
                     labels:
                       app: integration-nfeio-adapter
                   spec:
+                    terminationGracePeriodSeconds: 45
                     serviceAccountName: integration-nfeio
                     containers:
                       - name: adapter

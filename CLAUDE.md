@@ -114,7 +114,8 @@ Key files in `providers/nfeio/adapter/`:
 - `adapter.go` — `DescribeHandler`, `ExecuteHandler`, `executeRoute` switch for canonical ops and allowlisted actions.
 - `reconcilers.go`: `WireReconcilersWithInstance` installs the SDK reconcile dispatch (ensure/observe/destroy triples + §6.5 mutation-event emission) ahead of the action switch. `wireReconcilers` is the emitter test seam. `instance_id` on each event is Core's per-call `integration.instance.name`, lifted by `withEnvelopeInstance` in `adapter.go`; there is no static label.
 - `client.go` / `bearer.go` — NFe.io v2 HTTP client + auth.
-- `webhook_server.go` — inbound webhook listener: HMAC verify → LRU dedup → normalize → publish.
+- `webhook_server.go` — inbound webhook listener: HMAC verify → LRU dedup → normalize → publish. `StartWithAdmissionStop` closes admission before joining the original publisher and HTTP response.
+- `cmd/adapter/main.go` uses SDK v0.10.0's same-instance `Run` then `WaitDrained` before exit. Side health/webhook errors cancel admission and retain their cause; unqualified completion holds. Quickstart desired grace is 45 seconds; over-budget original work still waits. Actual image/grace adoption is separate. See `docs/OPERATIONS.md`.
 - `publish_dispatch.go`: republishes normalized webhook events to `enterprise-payments.*` via `/api/v1/capabilities/invoke`, a route Core does not have. `PublishDispatcherFromEnv` keeps it disabled unless `YGGDRASIL_CORE_BASE_URL` and `YGGDRASIL_WORKFLOW_RUN_TOKEN` are both set.
 - `issue_nfse.go` / `cancel_nfse.go` / `get_nfse_status.go` / `register_company.go` / `bulk_issue.go` / `retrieve_pdf.go` / `retrieve_xml.go` / `list_municipalities.go` / `manage_template.go` / `tax_calc.go` / `template_loader.go` / `webhook_subscription.go` — per-operation logic (filenames still use legacy NFSe verbs).
 

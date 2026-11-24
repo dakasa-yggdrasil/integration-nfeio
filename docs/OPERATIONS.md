@@ -21,6 +21,38 @@ Served by the health server on `HEALTHCHECK_PORT` (default `8080`):
 > on transport loss — both probes always return 200. Use the metrics + RPC describe
 > path to detect degradation.
 
+## Planned shutdown
+
+The selected Source candidate pins the signed SDK v0.10.0 release. One `Run`
+owns the original subscriptions; its return is followed by that same adapter's
+`WaitDrained(context.Background())`. Health or legacy webhook listener failures
+stop admission through the same Run context and retain their original errors.
+An unqualified original completion keeps the process held. Listener errors never
+call `Fatal` from a side goroutine while an original reply can still be active.
+
+The legacy webhook listener is prepared before startup so an early shutdown
+cannot be followed by a new bind. Cancellation closes its listener and joins
+the admitted publisher and HTTP response without cancelling their request
+contexts. It preserves the existing HMAC, deduplication, dispatcher, and response
+contracts. A listener error also stops sibling RPC admission before waiting for
+its original HTTP shutdown.
+
+After the SDK joins, health and webhook completion share a ten-second first-wait
+budget. If it expires, the process still waits for those same original requests
+and reports the original overrun only after they join. It does not force-close
+them or treat a timeout as proof that a possible provider effect did not occur.
+
+The quickstart declares a 45-second termination grace: the SDK's 30-second
+request budget, its initial one-second shutdown wait, the shared ten-second
+auxiliary wait, and four seconds of exit margin. This is a desired Source
+setting, not evidence about a deployed image or runtime grace. The legacy
+listener has no total body-read deadline; a stalled body, publisher, response,
+or unqualified completion can exceed this budget. Such work remains held rather
+than being reported drained. A platform kill at its grace deadline can still
+interrupt it. Autoscaling adoption needs the actual image and desired grace,
+and must preserve unknown effects without automatic replay or exactly-once
+claims. This Source change does not update the prepared active26 workloads.
+
 ## Metrics
 
 Seven Prometheus series registered in `providers/nfeio/adapter/spec.go`, exposed at

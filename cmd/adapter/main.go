@@ -129,13 +129,11 @@ func main() {
 		logger.Fatal("unsupported YGGDRASIL_TRANSPORT", zap.String("value", transport))
 	}
 
+	ctx, stopAdmission := context.WithCancel(sdkadapter.WithSignalHandler(context.Background()))
+	defer stopAdmission()
 	// 2) Health server — separate port so probes survive RPC degradation.
 	healthSrv := newHealthServer(cfg.HealthPort)
-	go func() {
-		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal("health server", zap.Error(err))
-		}
-	}()
+	healthDone := serveAuxiliaryListener("health", healthSrv.ListenAndServe, stopAdmission, logger)
 
 	// 3) Webhook server: third listener, for legacy normalized callbacks.
 	// The publish dispatcher has its own URL and bearer pair and never reads
@@ -152,23 +150,36 @@ func main() {
 		logger.Warn("legacy webhook publish dispatcher disabled; webhook events are logged and dropped",
 			zap.String("requires", ad.EnvPublishCoreURL+" and "+ad.EnvPublishToken))
 	}
-	webhookCtx, cancelWebhook := context.WithCancel(context.Background())
-	defer cancelWebhook()
-	go func() {
-		if err := webhookSrv.Start(webhookCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal("webhook server", zap.Error(err))
+	webhookDone := serveAuxiliaryListener("webhook", func() error { return webhookSrv.StartWithAdmissionStop(ctx, stopAdmission) }, stopAdmission, logger)
+
+	runErr, drainErr := runAndJoinOriginalDrain(ctx, a, stopAdmission)
+	if drainErr != nil {
+		logger.Error("original SDK completion unqualified; holding process", zap.Error(drainErr))
+		for {
+			time.Sleep(time.Hour)
 		}
-	}()
-
-	ctx := sdkadapter.WithSignalHandler(context.Background())
-	if err := a.Run(ctx); err != nil {
-		logger.Fatal("adapter run", zap.Error(err))
 	}
-
+	// Both auxiliary lifetimes use one shared first-wait budget. Expiry
+	// reports an overrun but still joins the same original shutdowns.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = healthSrv.Shutdown(shutdownCtx)
-	_ = webhookSrv.Shutdown(shutdownCtx)
+	auxiliary, waitErr := joinAuxiliaryServers(shutdownCtx, healthSrv, healthDone, webhookDone)
+	if runErr != nil {
+		logger.Fatal("adapter run after original completion joined", zap.Error(runErr))
+	}
+	if waitErr != nil {
+		logger.Fatal("auxiliary shutdown budget exceeded; original handlers now joined", zap.Error(waitErr))
+	}
+	if auxiliary.healthShutdown != nil {
+		logger.Fatal("health shutdown after original handlers joined", zap.Error(auxiliary.healthShutdown))
+	}
+	if auxiliary.healthServe != nil && !errors.Is(auxiliary.healthServe, http.ErrServerClosed) {
+		logger.Fatal("health listener after original completion joined", zap.Error(auxiliary.healthServe))
+	}
+	if auxiliary.webhookServe != nil && !errors.Is(auxiliary.webhookServe, http.ErrServerClosed) {
+		logger.Fatal("webhook listener after original completion joined", zap.Error(auxiliary.webhookServe))
+	}
+
 }
 
 // newHealthServer mounts /healthz (always 200), /readyz (always 200; the
@@ -197,4 +208,47 @@ func envOrDefault(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// The same Run owns the original SDK handle. Its return also closes auxiliary
+// admission, including terminal broker errors that do not cancel caller ctx.
+type originalDrainRunner interface {
+	Run(context.Context) error
+	WaitDrained(context.Context) error
+}
+
+func runAndJoinOriginalDrain(ctx context.Context, a originalDrainRunner, stopAdmission context.CancelFunc) (error, error) {
+	runErr := a.Run(ctx)
+	stopAdmission()
+	return runErr, a.WaitDrained(context.Background())
+}
+func serveAuxiliaryListener(name string, serve func() error, stopAdmission context.CancelFunc, logger *zap.Logger) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		err := serve()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("auxiliary listener failed; stopping admission", zap.String("listener", name), zap.Error(err))
+			stopAdmission()
+		}
+		done <- err
+		close(done)
+	}()
+	return done
+}
+
+type auxiliaryCompletion struct{ healthShutdown, healthServe, webhookServe error }
+
+func joinAuxiliaryServers(ctx context.Context, health *http.Server, healthDone, webhookDone <-chan error) (auxiliaryCompletion, error) {
+	original := make(chan auxiliaryCompletion, 1)
+	go func() {
+		shutdown := health.Shutdown(context.Background())
+		original <- auxiliaryCompletion{shutdown, <-healthDone, <-webhookDone}
+	}()
+	select {
+	case result := <-original:
+		return result, nil
+	case <-ctx.Done():
+		// This is a wait limit, never a new shutdown or forced close.
+		return <-original, ctx.Err()
+	}
 }

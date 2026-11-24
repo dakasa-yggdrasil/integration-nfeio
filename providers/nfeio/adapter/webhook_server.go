@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -37,7 +38,7 @@ func NewWebhookServer(cfg *config.Config, cli *Client, logger *zap.Logger) *Webh
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &WebhookServer{
+	server := &WebhookServer{
 		cfg:    cfg,
 		cli:    cli,
 		logger: logger,
@@ -47,6 +48,15 @@ func NewWebhookServer(cfg *config.Config, cli *Client, logger *zap.Logger) *Webh
 			return nil
 		},
 	}
+	// Prepare the one original server before Start or Shutdown can race.
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhook/nfeio", server.handle)
+	server.httpSrv = &http.Server{
+		Addr:              ":" + cfg.WebhookPort,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return server
 }
 
 // SetPublisher injects the publisher, typically a PublishDispatcher that
@@ -58,20 +68,41 @@ func (s *WebhookServer) SetPublisher(p func(queue string, body []byte) error) {
 	}
 }
 
-// Start binds to cfg.WebhookPort and serves until ctx cancels.
+// Start binds until cancellation or listener failure, then joins the original
+// HTTP handlers. A caller deadline never establishes their absence.
 func (s *WebhookServer) Start(ctx context.Context) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/webhook/nfeio", s.handle)
-	s.httpSrv = &http.Server{
-		Addr:              ":" + s.cfg.WebhookPort,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+	return s.StartWithAdmissionStop(ctx, nil)
+}
+
+// StartWithAdmissionStop also stops sibling RPC admission immediately when the
+// listener fails. The callback does not cancel any admitted webhook request.
+func (s *WebhookServer) StartWithAdmissionStop(ctx context.Context, stopAdmission context.CancelFunc) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
+	serveReturned := make(chan struct{})
+	shutdownDone := make(chan struct{})
+	var shutdownErr error
 	go func() {
-		<-ctx.Done()
-		_ = s.httpSrv.Shutdown(context.Background())
+		defer close(shutdownDone)
+		select {
+		case <-ctx.Done():
+		case <-serveReturned:
+		}
+		// One original shutdown owns admitted webhook requests. It neither
+		// cancels their contexts nor drops a publisher still returning.
+		shutdownErr = s.httpSrv.Shutdown(context.Background())
 	}()
-	return s.httpSrv.ListenAndServe()
+	serveErr := s.httpSrv.ListenAndServe()
+	if serveErr != nil && serveErr != http.ErrServerClosed && stopAdmission != nil {
+		stopAdmission()
+	}
+	close(serveReturned)
+	<-shutdownDone
+	if shutdownErr != nil {
+		return fmt.Errorf("original webhook shutdown: %w", shutdownErr)
+	}
+	return serveErr
 }
 
 // Shutdown gracefully terminates the webhook server.
