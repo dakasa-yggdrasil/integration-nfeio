@@ -1,0 +1,192 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-11-24T20:14:32-03:00",
+  "primary_language": "go",
+  "languages": {
+    ".go": 46,
+    ".yaml": 29,
+    ".yml": 4
+  },
+  "provenance": {
+    "commit": "13e8f7dced8a3c43b394df794b736fb835f504b7",
+    "dirty": false,
+    "files": [
+      {
+        "path": "AGENTS.md",
+        "sha256": "a42bc53e44ae274589f3cdd0587f7bff82ec284e74e3b1b25f5485c6fc4d3334"
+      },
+      {
+        "path": "CLAUDE.md",
+        "sha256": "c645dcc1ee0f6982c1c991ff4606a614d97aca8b9b086e8807cad8d2d7709eef"
+      },
+      {
+        "path": "README.md",
+        "sha256": "32cbc1be23c5088d61d6f5059830d0a49cf7ab44aa3cfc68479295b86436b62c"
+      },
+      {
+        "path": "Dockerfile",
+        "sha256": "6a61b23c39740d0a203e66e14aa3ff4fe04ba351c9464406eb8def45524a28f5"
+      },
+      {
+        "path": "go.mod",
+        "sha256": "70113af79f06e57ba5527ed99dd1e4ecbf3a6ec7699ca3f1c226403e01b4899f"
+      }
+    ]
+  },
+  "service": {},
+  "top_dirs": [
+    {
+      "path": "providers/nfeio/adapter",
+      "files": 35,
+      "kb": 196
+    },
+    {
+      "path": "manifest",
+      "files": 17,
+      "kb": 17
+    },
+    {
+      "path": "cmd/adapter/templates",
+      "files": 5,
+      "kb": 2
+    },
+    {
+      "path": "manifest/templates",
+      "files": 5,
+      "kb": 2
+    },
+    {
+      "path": ".github/workflows",
+      "files": 4,
+      "kb": 14
+    },
+    {
+      "path": "cmd/adapter",
+      "files": 3,
+      "kb": 21
+    },
+    {
+      "path": "family/contract",
+      "files": 2,
+      "kb": 7
+    },
+    {
+      "path": "pkg/contractcheck",
+      "files": 2,
+      "kb": 9
+    },
+    {
+      "path": "providers/nfeio/config",
+      "files": 2,
+      "kb": 4
+    },
+    {
+      "path": ".",
+      "files": 1,
+      "kb": 10
+    },
+    {
+      "path": "cmd/lint-action-catalog",
+      "files": 1,
+      "kb": 1
+    },
+    {
+      "path": "cmd/validate-templates",
+      "files": 1,
+      "kb": 0
+    }
+  ],
+  "top_files_by_size": [
+    {
+      "path": "providers/nfeio/adapter/adapter.go",
+      "kb": 29
+    },
+    {
+      "path": "providers/nfeio/adapter/webhook_subscription_test.go",
+      "kb": 20
+    },
+    {
+      "path": "providers/nfeio/adapter/spec.go",
+      "kb": 16
+    },
+    {
+      "path": "providers/nfeio/adapter/webhook_subscription.go",
+      "kb": 16
+    },
+    {
+      "path": "providers/nfeio/adapter/reconcilers.go",
+      "kb": 11
+    },
+    {
+      "path": "providers/nfeio/adapter/reconcilers_test.go",
+      "kb": 10
+    },
+    {
+      "path": "yggdrasil-quickstart.yaml",
+      "kb": 10
+    },
+    {
+      "path": "cmd/adapter/main.go",
+      "kb": 9
+    },
+    {
+      "path": "cmd/adapter/main_original_drain_test.go",
+      "kb": 9
+    },
+    {
+      "path": "providers/nfeio/adapter/spec_test.go",
+      "kb": 8
+    },
+    {
+      "path": "providers/nfeio/adapter/event_instance_test.go",
+      "kb": 7
+    },
+    {
+      "path": "providers/nfeio/adapter/webhook_server.go",
+      "kb": 7
+    }
+  ],
+  "contracts": {
+    "openapi": false,
+    "openapi_endpoints_estimated": 0,
+    "event_schemas": 0
+  },
+  "database": {
+    "migrations": 0
+  },
+  "docs": {
+    "glossary": false,
+    "readme": true
+  },
+  "dependencies": {
+    "go_modules": [
+      "github.com/beorn7/perks v1.0.1 // indirect",
+      "github.com/cespare/xxhash/v2 v2.3.0 // indirect",
+      "github.com/dakasa-yggdrasil/yggdrasil-sdk-go v0.10.0",
+      "github.com/go-logr/logr v1.4.3 // indirect",
+      "github.com/go-logr/stdr v1.2.2 // indirect",
+      "github.com/google/uuid v1.6.0 // indirect",
+      "github.com/hashicorp/golang-lru/v2 v2.0.7",
+      "github.com/klauspost/compress v1.17.9 // indirect",
+      "github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect",
+      "github.com/prometheus/client_golang v1.20.5",
+      "github.com/prometheus/client_model v0.6.1 // indirect",
+      "github.com/prometheus/common v0.55.0 // indirect",
+      "github.com/prometheus/procfs v0.15.1 // indirect",
+      "github.com/rabbitmq/amqp091-go v1.13.0 // indirect",
+      "go.opentelemetry.io/auto/sdk v1.2.1 // indirect",
+      "go.opentelemetry.io/otel v1.43.0",
+      "go.opentelemetry.io/otel/metric v1.43.0 // indirect",
+      "go.opentelemetry.io/otel/trace v1.43.0 // indirect",
+      "go.uber.org/multierr v1.10.0 // indirect",
+      "go.uber.org/zap v1.27.0",
+      "golang.org/x/sys v0.22.0 // indirect",
+      "google.golang.org/protobuf v1.34.2 // indirect",
+      "gopkg.in/yaml.v3 v3.0.1"
+    ]
+  },
+  "ops": {
+    "config_files": 5,
+    "k8s_manifests": 5
+  }
+}
